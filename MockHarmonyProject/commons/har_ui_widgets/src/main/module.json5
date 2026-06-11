@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "har_ui_widgets",
+    "type": "har", // entry|feature|shared|har
+    "description": "UI 组件库",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

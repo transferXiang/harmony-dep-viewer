@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "har_danmaku",
+    "type": "har", // entry|feature|shared|har
+    "description": "弹幕渲染库",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

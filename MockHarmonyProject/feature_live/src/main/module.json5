@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "feature_live",
+    "type": "feature", // entry|feature|shared|har
+    "description": "直播特性模块（按需安装）",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

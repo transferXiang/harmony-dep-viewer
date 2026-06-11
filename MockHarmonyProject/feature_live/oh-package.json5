@@ -1,0 +1,12 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "feature_live",
+  "version": "1.0.0",
+  "description": "直播特性模块（按需安装）",
+  "dependencies": {
+    "hsp_player_core": "file:../shared/hsp_player_core",
+    "hsp_common_ui": "file:../shared/hsp_common_ui",
+    "har_danmaku": "file:../commons/har_danmaku",
+    "har_analytics": "file:../commons/har_analytics",
+  },
+}

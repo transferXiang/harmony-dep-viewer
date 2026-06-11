@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "har_image_loader",
+    "type": "har", // entry|feature|shared|har
+    "description": "图片加载库",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

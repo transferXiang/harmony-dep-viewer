@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "har_crypto",
+    "type": "har", // entry|feature|shared|har
+    "description": "加解密库",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

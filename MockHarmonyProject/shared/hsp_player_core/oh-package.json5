@@ -1,0 +1,11 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "hsp_player_core",
+  "version": "1.0.0",
+  "description": "播放内核动态共享包",
+  "dependencies": {
+    "hsp_common_ui": "file:../hsp_common_ui",
+    "har_network": "file:../../commons/har_network",
+    "har_danmaku": "file:../../commons/har_danmaku",
+  },
+}

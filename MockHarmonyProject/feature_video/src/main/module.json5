@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "feature_video",
+    "type": "feature", // entry|feature|shared|har
+    "description": "点播特性模块（按需安装）",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

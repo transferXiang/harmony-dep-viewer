@@ -1,0 +1,13 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "应用主入口 UIAbility",
+  "dependencies": {
+    "hsp_common_ui": "file:../shared/hsp_common_ui",
+    "hsp_account": "file:../shared/hsp_account",
+    "har_analytics": "file:../commons/har_analytics",
+    "har_ui_widgets": "file:../commons/har_ui_widgets",
+    "@ohos/lottie": "^2.0.5", // ohpm 三方库
+  },
+}

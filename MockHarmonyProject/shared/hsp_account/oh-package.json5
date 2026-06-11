@@ -1,0 +1,11 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "hsp_account",
+  "version": "1.0.0",
+  "description": "账号体系动态共享包",
+  "dependencies": {
+    "har_crypto": "file:../../commons/har_crypto",
+    "har_storage": "file:../../commons/har_storage",
+    "har_network": "file:../../commons/har_network",
+  },
+}

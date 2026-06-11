@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "har_network",
+    "type": "har", // entry|feature|shared|har
+    "description": "网络请求库",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

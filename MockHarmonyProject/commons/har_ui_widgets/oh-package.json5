@@ -1,0 +1,9 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "har_ui_widgets",
+  "version": "1.0.0",
+  "description": "UI 组件库",
+  "dependencies": {
+    "har_utils": "file:../har_utils",
+  },
+}

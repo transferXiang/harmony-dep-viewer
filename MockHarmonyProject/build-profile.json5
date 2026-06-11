@@ -1,0 +1,86 @@
+/**
+ * 工程级构建配置 — 模块清单在 modules 中声明
+ */
+{
+  "app": {
+    "signingConfigs": [],
+    "products": [{ "name": "default", "signingConfig": "default", "compatibleSdkVersion": "5.0.0(12)" }],
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry", // 应用主入口 UIAbility
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "feature_video",
+      "srcPath": "./feature_video", // 点播特性模块（按需安装）
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "feature_live",
+      "srcPath": "./feature_live", // 直播特性模块（按需安装）
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "hsp_common_ui",
+      "srcPath": "./shared/hsp_common_ui", // 公共 UI 动态共享包
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "hsp_player_core",
+      "srcPath": "./shared/hsp_player_core", // 播放内核动态共享包
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "hsp_account",
+      "srcPath": "./shared/hsp_account", // 账号体系动态共享包
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "har_utils",
+      "srcPath": "./commons/har_utils", // 基础工具库
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "har_logger",
+      "srcPath": "./commons/har_logger", // 日志库
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "har_network",
+      "srcPath": "./commons/har_network", // 网络请求库
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "har_storage",
+      "srcPath": "./commons/har_storage", // 本地存储库
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "har_crypto",
+      "srcPath": "./commons/har_crypto", // 加解密库
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "har_ui_widgets",
+      "srcPath": "./commons/har_ui_widgets", // UI 组件库
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "har_image_loader",
+      "srcPath": "./commons/har_image_loader", // 图片加载库
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "har_danmaku",
+      "srcPath": "./commons/har_danmaku", // 弹幕渲染库
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    },
+    {
+      "name": "har_analytics",
+      "srcPath": "./commons/har_analytics", // 埋点统计库
+      "targets": [{ "name": "default", "applyToProducts": ["default"] }],
+    }
+  ],
+}

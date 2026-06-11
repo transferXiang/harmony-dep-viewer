@@ -1,0 +1,10 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "har_image_loader",
+  "version": "1.0.0",
+  "description": "图片加载库",
+  "dependencies": {
+    "har_network": "file:../har_network",
+    "har_utils": "file:../har_utils",
+  },
+}

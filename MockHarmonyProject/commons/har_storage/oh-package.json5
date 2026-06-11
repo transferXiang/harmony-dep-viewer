@@ -1,0 +1,10 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "har_storage",
+  "version": "1.0.0",
+  "description": "本地存储库",
+  "dependencies": {
+    "har_crypto": "file:../har_crypto",
+    "har_utils": "file:../har_utils",
+  },
+}

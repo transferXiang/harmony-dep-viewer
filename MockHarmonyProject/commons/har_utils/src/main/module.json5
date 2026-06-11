@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "har_utils",
+    "type": "har", // entry|feature|shared|har
+    "description": "基础工具库",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

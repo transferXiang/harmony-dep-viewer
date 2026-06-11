@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "har_logger",
+    "type": "har", // entry|feature|shared|har
+    "description": "日志库",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

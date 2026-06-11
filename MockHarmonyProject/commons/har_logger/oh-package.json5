@@ -1,0 +1,9 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "har_logger",
+  "version": "1.0.0",
+  "description": "日志库",
+  "dependencies": {
+    "har_utils": "file:../har_utils",
+  },
+}

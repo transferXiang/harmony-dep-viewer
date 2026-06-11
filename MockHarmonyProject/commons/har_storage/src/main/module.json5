@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "har_storage",
+    "type": "har", // entry|feature|shared|har
+    "description": "本地存储库",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

@@ -1,0 +1,6 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "har_utils",
+  "version": "1.0.0",
+  "description": "基础工具库",
+}

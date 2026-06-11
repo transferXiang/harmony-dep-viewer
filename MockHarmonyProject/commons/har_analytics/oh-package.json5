@@ -1,0 +1,10 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "har_analytics",
+  "version": "1.0.0",
+  "description": "埋点统计库",
+  "dependencies": {
+    "har_network": "file:../har_network",
+    "har_storage": "file:../har_storage",
+  },
+}

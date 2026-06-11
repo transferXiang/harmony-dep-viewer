@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "har_analytics",
+    "type": "har", // entry|feature|shared|har
+    "description": "埋点统计库",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

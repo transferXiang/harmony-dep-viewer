@@ -1,0 +1,11 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "har_danmaku",
+  "version": "1.0.0",
+  "description": "弹幕渲染库",
+  "dependencies": {
+    "har_ui_widgets": "file:../har_ui_widgets",
+    "har_utils": "file:../har_utils",
+    "@ohos/gpu_transform": "^1.0.1", // ohpm 三方库
+  },
+}

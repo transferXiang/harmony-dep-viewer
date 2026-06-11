@@ -1,0 +1,11 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "feature_video",
+  "version": "1.0.0",
+  "description": "点播特性模块（按需安装）",
+  "dependencies": {
+    "hsp_player_core": "file:../shared/hsp_player_core",
+    "har_image_loader": "file:../commons/har_image_loader",
+    "har_analytics": "file:../commons/har_analytics",
+  },
+}

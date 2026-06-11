@@ -1,0 +1,10 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "har_network",
+  "version": "1.0.0",
+  "description": "网络请求库",
+  "dependencies": {
+    "har_logger": "file:../har_logger",
+    "har_utils": "file:../har_utils",
+  },
+}

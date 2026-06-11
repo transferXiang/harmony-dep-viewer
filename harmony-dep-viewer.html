@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>鸿蒙模块依赖分析 — HAP / HSP / HAR</title>
+<style>
+  :root{
+    --hap:#d97757; --hap-bg:#fdf1ec;
+    --hsp:#3f7ec2; --hsp-bg:#edf4fb;
+    --har:#7a8089; --har-bg:#f7f8f9;
+    --ink:#1f2328; --ink2:#6b7280; --line:#c9cdd3;
+    --warn:#c2413f; --ok:#3a7d44; --panel:#ffffff; --bg:#f3f4f6;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; background:var(--bg); color:var(--ink); height:100vh; display:flex; flex-direction:column; overflow:hidden;}
+  header{padding:10px 20px; background:var(--panel); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+  header h1{font-size:16px; font-weight:600;}
+  .btn{padding:6px 12px; font-size:12.5px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; color:var(--ink);}
+  .btn:hover{background:var(--bg);}
+  .btn.primary{background:var(--hsp); border-color:var(--hsp); color:#fff;}
+  .btn.primary:hover{opacity:.9;}
+  #status{font-size:12px; color:var(--ink2);}
+  .legend{display:flex; gap:12px; font-size:12px; color:var(--ink2); align-items:center; margin-left:auto;}
+  .legend .sw{display:inline-block; width:14px; height:10px; border-radius:3px; margin-right:4px; vertical-align:-1px; border:1.5px solid;}
+  .legend .dash{display:inline-block; width:20px; border-top:2px dashed var(--hsp); margin-right:4px; vertical-align:3px;}
+  .legend .solid{display:inline-block; width:20px; border-top:2px solid var(--har); margin-right:4px; vertical-align:3px;}
+  main{flex:1; display:flex; min-height:0;}
+  #graphWrap{flex:1; position:relative; overflow:hidden; cursor:grab;}
+  #graphWrap.panning{cursor:grabbing;}
+  svg{width:100%; height:100%; display:block;}
+  #ctrlBar{position:absolute; top:10px; left:10px; z-index:5; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:7px 12px; display:flex; gap:12px; align-items:center; font-size:12.5px; box-shadow:0 1px 4px rgba(0,0,0,.06);}
+  #ctrlBar select{font-size:12.5px; padding:2px 4px; border:1px solid var(--line); border-radius:5px; background:#fff;}
+  #ctrlBar label{display:flex; align-items:center; gap:4px; cursor:pointer; color:var(--ink2);}
+  #ctrlBar .sep{width:1px; height:18px; background:var(--line);}
+  #ctrlBar .fwd{color:var(--hap); font-weight:600;}
+  #ctrlBar .rev{color:var(--ok); font-weight:600;}
+  #empty{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; color:var(--ink2); font-size:14px; text-align:center; line-height:1.8; background:var(--bg); z-index:6;}
+  #empty .btn{font-size:14px; padding:10px 22px;}
+  aside{width:340px; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; min-height:0;}
+  aside .tools{padding:10px 14px; border-bottom:1px solid var(--line); display:flex; gap:8px;}
+  aside .tools button{flex:1;}
+  aside .scroll{flex:1; overflow-y:auto; padding:14px;}
+  .sec{margin-bottom:18px;}
+  .sec h2{font-size:13px; font-weight:600; margin-bottom:8px;}
+  .sec h2 small{font-weight:400; color:var(--ink2);}
+  .row{display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; font-size:12.5px;}
+  .row:hover{background:var(--bg);}
+  .row.active{background:var(--hsp-bg);}
+  .row .name{flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .row .bar{height:8px; border-radius:4px; background:var(--hsp); opacity:.75;}
+  .row .num{font-variant-numeric:tabular-nums; color:var(--ink2); text-align:right; white-space:nowrap;}
+  .tag{font-size:10px; padding:1px 5px; border-radius:4px; color:#fff; flex-shrink:0;}
+  .tag.hap{background:var(--hap);} .tag.hsp{background:var(--hsp);} .tag.har{background:var(--har);}
+  .dupRow .num{color:var(--warn); font-weight:600;}
+  #detail{font-size:12.5px; line-height:1.7; background:var(--bg); border-radius:8px; padding:10px 12px;}
+  #detail .modList{display:flex; flex-wrap:wrap; gap:5px; margin-top:6px;}
+  #detail .chip{font-size:11px; padding:2px 7px; border-radius:10px; background:#fff; border:1px solid var(--line); cursor:pointer;}
+  #detail .chip:hover{border-color:var(--hsp);}
+  #detail .kv{display:flex; justify-content:space-between;}
+  #detail .kv b{font-variant-numeric:tabular-nums;}
+  .muted{color:var(--ink2);}
+  .hint{font-size:11.5px; color:var(--ink2); padding:0 14px 10px; line-height:1.6;}
+  /* SVG 节点与边 */
+  .node{cursor:grab;}
+  .node.dragging{cursor:grabbing;}
+  .node rect{stroke-width:1.6;}
+  .node.hap rect{fill:var(--hap-bg); stroke:var(--hap);}
+  .node.hsp rect{fill:var(--hsp-bg); stroke:var(--hsp); stroke-width:2;}
+  .node.har rect{fill:var(--har-bg); stroke:var(--har);}
+  .node.ext rect{stroke-dasharray:3 3;}
+  .node text.label{font-size:12px; fill:var(--ink); font-weight:600; pointer-events:none;}
+  .node text.sub{font-size:10px; fill:var(--ink2); pointer-events:none;}
+  .node .badge{fill:var(--warn);}
+  .node .badge-t{fill:#fff; font-size:9.5px; font-weight:700;}
+  .edge{fill:none; stroke:var(--line); stroke-width:1.5;}
+  .edge.dyn{stroke:var(--hsp); stroke-dasharray:6 5; opacity:.65;}
+  .hidden{display:none;}
+  /* 聚焦模式 */
+  .node.root rect{stroke-width:3.5; filter:drop-shadow(0 0 5px rgba(230,162,60,.95)) drop-shadow(0 0 2px rgba(230,162,60,.8));}
+  .node.fwd rect{}
+  .node.revN rect{stroke:var(--ok);}
+  .node.cutNode rect{stroke-dasharray:5 4;}
+  .edge.fwdE{stroke:var(--hap); stroke-width:2.2; opacity:1;}
+  .edge.revE{stroke:var(--ok); stroke-width:2; opacity:1;}
+  .edge.cutEdge{stroke:var(--warn); stroke-width:2; stroke-dasharray:6 5; opacity:1;}
+  .cutMark circle{fill:#fff; stroke:var(--warn); stroke-width:1.4;}
+  .cutMark line{stroke:var(--warn); stroke-width:1.4;}
+  #tip{position:absolute; pointer-events:none; background:var(--ink); color:#fff; font-size:11.5px; padding:7px 10px; border-radius:6px; line-height:1.55; max-width:280px; opacity:0; transition:opacity .12s; z-index:10;}
+</style>
+</head>
+<body>
+<header>
+  <h1>鸿蒙模块依赖分析</h1>
+  <button class="btn primary" onclick="scanProject()">扫描工程目录</button>
+  <button class="btn" onclick="clearData()">清除缓存数据</button>
+  <span id="status"></span>
+  <div class="legend">
+    <span><span class="sw" style="background:var(--hap-bg);border-color:var(--hap)"></span>HAP</span>
+    <span><span class="sw" style="background:var(--hsp-bg);border-color:var(--hsp)"></span>HSP</span>
+    <span><span class="sw" style="background:var(--har-bg);border-color:var(--har)"></span>HAR</span>
+    <span><span class="solid"></span>静态依赖</span>
+    <span><span class="dash"></span>动态依赖</span>
+  </div>
+</header>
+<main>
+  <div id="graphWrap">
+    <svg id="svg"></svg>
+    <div id="ctrlBar">
+      <button class="btn" onclick="autoLayout()">自动排版</button>
+      <span class="sep"></span>
+      <span><span class="fwd">正向</span>（它依赖谁）
+        <select id="fLv"><option value="0">0 级（不看）</option><option value="1">1 级</option><option value="2">2 级</option><option value="3">3 级</option><option value="" selected>到底</option></select>
+      </span>
+      <span><span class="rev">反向</span>（谁依赖它）
+        <select id="rLv"><option value="0">0 级（不看）</option><option value="1">1 级</option><option value="2">2 级</option><option value="3">3 级</option><option value="" selected>到底</option></select>
+      </span>
+      <label><input type="checkbox" id="cutChk" checked>遇 HSP/HAP 截断</label>
+      <span class="sep"></span>
+      <input id="searchBox" list="nodeNames" placeholder="搜索模块名…" style="font-size:12.5px;padding:3px 8px;border:1px solid var(--line);border-radius:5px;width:150px">
+      <datalist id="nodeNames"></datalist>
+    </div>
+    <div id="tip"></div>
+    <div id="empty">
+      <div>尚无数据。请选择鸿蒙工程<b>根目录</b>（含 build-profile.json5），<br>将自动解析各模块的 module.json5 / oh-package.json5 并生成依赖图。<br>扫描结果会保存在浏览器本地，下次打开无需重新扫描。</div>
+      <button class="btn primary" onclick="scanProject()">选择工程目录并扫描</button>
+    </div>
+  </div>
+  <aside>
+    <div class="tools">
+      <button class="btn" onclick="exportJSON()">导出分析 JSON</button>
+      <button class="btn" onclick="exportCSV()">导出统计 CSV</button>
+    </div>
+    <div class="scroll">
+      <div class="sec" id="detailSec" style="display:none">
+        <h2 id="detailTitle"></h2>
+        <div id="detail"></div>
+      </div>
+      <div class="sec">
+        <h2>静态打包规模排名 <small>· 打入的 HAR 个数 / 源码量估算</small></h2>
+        <div id="rankList"></div>
+      </div>
+      <div class="sec">
+        <h2>重复打包的 HAR <small>· 被 ≥2 个包拷贝</small></h2>
+        <div id="dupList"></div>
+        <div id="wasteSum" class="muted" style="font-size:12px; padding:6px 8px;"></div>
+      </div>
+    </div>
+    <div class="hint">左键点节点：选中查看详情（不筛选）· <b>右键点节点 / 搜索：筛选</b>，只显示其正反向追溯（0 级=不看该方向）· <b>右键空白：恢复全图</b>，左键空白不影响选择<br>筛选状态下「自动排版」只对当前子图排版 · 拖动节点调位置（自动保存）· 滚轮缩放 / 拖空白平移<br>体积为源码目录大小估算，非构建产物真实体积</div>
+  </aside>
+</main>
+<input type="file" id="dirInput" webkitdirectory multiple style="display:none">
+
+<script>
+'use strict';
+/* ============================================================
+   SCAN-CORE-BEGIN  （目录扫描 + JSON5 解析，纯逻辑，可独立测试）
+   entries: [{path, size, text: async()=>string}]，path 相对工程根
+============================================================ */
+const SKIP_DIRS = new Set(['oh_modules','node_modules','build','.git','.hvigor','.idea','.preview','.cxx','libs_gen']);
+
+function parseJSON5(src){
+  let out='', i=0, inStr=null;
+  while(i<src.length){
+    const c=src[i], n=src[i+1];
+    if(inStr){ out+=c; if(c==='\\'){out+=n??''; i+=2; continue;} if(c===inStr) inStr=null; i++; continue; }
+    if(c==='"'||c==="'"){ inStr=c; out+=c; i++; continue; }
+    if(c==='/'&&n==='/'){ while(i<src.length&&src[i]!=='\n')i++; continue; }
+    if(c==='/'&&n==='*'){ i+=2; while(i<src.length&&!(src[i]==='*'&&src[i+1]==='/'))i++; i+=2; continue; }
+    out+=c; i++;
+  }
+  out=out.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g,(m,p)=>'"'+p.replace(/"/g,'\\"')+'"');
+  out=out.replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g,'$1"$2":');
+  out=out.replace(/,(\s*[}\]])/g,'$1');
+  return JSON.parse(out);
+}
+function normPath(p){
+  const seg=[];
+  for(const s of p.replace(/\\/g,'/').split('/')){
+    if(!s||s==='.')continue;
+    if(s==='..')seg.pop(); else seg.push(s);
+  }
+  return seg.join('/');
+}
+function joinPath(baseDir,rel){ return normPath(baseDir+'/'+rel); }
+
+async function scanCore(entries, projectName){
+  const byPath=new Map(entries.map(e=>[e.path,e]));
+  const bp=byPath.get('build-profile.json5');
+  if(!bp) throw new Error('所选目录中未找到 build-profile.json5，请确认选择的是工程根目录');
+  let profile;
+  try{ profile=parseJSON5(await bp.text()); }
+  catch(e){ throw new Error('build-profile.json5 解析失败：'+e.message); }
+  const list=(profile.modules||[]).map(m=>({name:m.name, src:normPath(m.srcPath||m.name)}));
+  if(!list.length) throw new Error('build-profile.json5 中未声明任何 modules');
+
+  const modules=[], deps=[], byDir=new Map(), byPkg=new Map(), warnings=[];
+  for(const m of list){
+    const mjE=byPath.get(m.src+'/src/main/module.json5');
+    if(!mjE){ warnings.push(`模块 ${m.name}: 缺少 src/main/module.json5，已跳过`); continue; }
+    let mj;
+    try{ mj=parseJSON5(await mjE.text()).module||{}; }
+    catch(e){ warnings.push(`模块 ${m.name}: module.json5 解析失败（${e.message}），已跳过`); continue; }
+    let pkg={};
+    const pkgE=byPath.get(m.src+'/oh-package.json5');
+    if(pkgE){ try{ pkg=parseJSON5(await pkgE.text()); }catch(e){ warnings.push(`模块 ${m.name}: oh-package.json5 解析失败（${e.message}），依赖按空处理`);} }
+    const mtype=mj.type||'har';
+    const type=mtype==='shared'?'hsp':(mtype==='har'?'har':'hap');
+    const sizeKB=Math.round(entries.reduce((s,e)=>e.path.startsWith(m.src+'/')?s+e.size:s,0)/1024);
+    const node={id:m.name, type, sub:mtype, size:sizeKB, desc:pkg.description||mj.description||'',
+                _deps:pkg.dependencies||{}, _src:m.src};
+    modules.push(node); byDir.set(m.src,node); if(pkg.name)byPkg.set(pkg.name,node);
+  }
+  const externals=new Map();
+  for(const m of modules){
+    for(const [dn,spec] of Object.entries(m._deps)){
+      let target=null;
+      if(typeof spec==='string'&&spec.startsWith('file:'))
+        target=byDir.get(joinPath(m._src,spec.slice(5)));
+      if(!target) target=byPkg.get(dn);
+      if(!target){
+        target=externals.get(dn);
+        if(!target){ target={id:dn,type:'har',sub:'ohpm',size:0,desc:'三方库 '+spec,ext:true}; externals.set(dn,target); }
+      }
+      if(target.id===m.id){ warnings.push(`模块 ${m.id}: 依赖自身，已忽略`); continue; }
+      deps.push([m.id,target.id]);
+    }
+    delete m._deps; delete m._src;
+  }
+  modules.push(...externals.values());
+  const out={}; modules.forEach(x=>out[x.id]=[]); deps.forEach(([a,b])=>out[a].push(b));
+  const state={}, cyc=[];
+  (function(){ for(const m of modules) visit(m.id,[]);
+    function visit(id,path){
+      if(state[id]==='done')return;
+      if(state[id]==='ing'){cyc.push(path.slice(path.indexOf(id)).concat(id).join(' → '));return;}
+      state[id]='ing'; for(const d of out[id])visit(d,path.concat(id)); state[id]='done';
+    } })();
+  if(cyc.length) warnings.push('检测到循环依赖：'+cyc[0]);
+  return {projectName, scannedAt:new Date().toISOString(), modules, deps, warnings};
+}
+/* SCAN-CORE-END */
+
+/* ================= 持久化 ================= */
+const STORE_KEY='harmony-dep-viewer:data';
+function saveData(d){ try{localStorage.setItem(STORE_KEY,JSON.stringify(d));}catch(e){console.warn('保存失败',e);} }
+function loadData(){ try{const s=localStorage.getItem(STORE_KEY); return s?JSON.parse(s):null;}catch(e){return null;} }
+function clearData(){
+  localStorage.removeItem(STORE_KEY); DATA=null; A=null;
+  document.getElementById('empty').style.display='flex';
+  document.getElementById('svg').innerHTML='';
+  document.getElementById('rankList').innerHTML=''; document.getElementById('dupList').innerHTML='';
+  document.getElementById('wasteSum').textContent=''; document.getElementById('detailSec').style.display='none';
+  setStatus('缓存已清除');
+}
+function setStatus(t){ document.getElementById('status').textContent=t; }
+
+/* ================= 目录选择与扫描 ================= */
+async function scanProject(){
+  if(window.showDirectoryPicker){
+    try{
+      const dir=await window.showDirectoryPicker();
+      setStatus('正在扫描 '+dir.name+' …');
+      const entries=[];
+      await (async function walk(h,prefix){
+        for await(const [name,child] of h.entries()){
+          if(child.kind==='directory'){ if(!SKIP_DIRS.has(name)) await walk(child,prefix+name+'/'); }
+          else{ const f=await child.getFile(); entries.push({path:prefix+name,size:f.size,text:()=>f.text()}); }
+        }
+      })(dir,'');
+      return finishScan(entries,dir.name);
+    }catch(e){
+      if(e.name==='AbortError'){setStatus('');return;}
+      console.warn('showDirectoryPicker 不可用，回退到 input 方式',e);
+    }
+  }
+  document.getElementById('dirInput').click();
+}
+document.getElementById('dirInput').addEventListener('change',ev=>{
+  const files=[...ev.target.files]; if(!files.length)return;
+  const rootName=files[0].webkitRelativePath.split('/')[0];
+  const entries=files
+    .filter(f=>!f.webkitRelativePath.split('/').some(s=>SKIP_DIRS.has(s)))
+    .map(f=>({path:f.webkitRelativePath.split('/').slice(1).join('/'), size:f.size, text:()=>f.text()}));
+  setStatus('正在扫描 '+rootName+' …');
+  finishScan(entries,rootName);
+  ev.target.value='';
+});
+async function finishScan(entries,name){
+  try{
+    const data=await scanCore(entries,name);
+    saveData(data); render(data,'新扫描');
+    if(data.warnings.length) alert('扫描完成，但有提示：\n· '+data.warnings.join('\n· '));
+  }catch(e){ setStatus('扫描失败'); alert('扫描失败：'+e.message); }
+}
+
+/* ================= 打包分析（HAR 追溯 / HSP 截断） ================= */
+function buildAnalysis(data){
+  const byId=Object.fromEntries(data.modules.map(m=>[m.id,m]));
+  const out={},inn={};
+  data.modules.forEach(m=>{out[m.id]=[];inn[m.id]=[];});
+  data.deps.forEach(([a,b])=>{ if(out[a]&&inn[b]){out[a].push(b);inn[b].push(a);} });
+  function analyze(rootId){
+    const bundled=new Set(),boundaries=new Set();
+    const visited=new Set([rootId]),stack=[rootId];
+    while(stack.length){
+      const cur=stack.pop();
+      for(const dep of out[cur]){
+        if(byId[dep].type==='har'){
+          bundled.add(dep);
+          if(!visited.has(dep)){visited.add(dep);stack.push(dep);}
+        }else boundaries.add(dep);
+      }
+    }
+    const kb=[...bundled].reduce((s,id)=>s+byId[id].size,0);
+    return {root:rootId,bundled,boundaries,kb};
+  }
+  const bundles=data.modules.filter(m=>m.type!=='har').map(m=>analyze(m.id));
+  const dup=data.modules.filter(m=>m.type==='har').map(m=>{
+    const owners=bundles.filter(b=>b.bundled.has(m.id)).map(b=>b.root);
+    return {id:m.id,owners,copies:owners.length,waste:Math.max(0,owners.length-1)*m.size};
+  }).sort((a,b)=>b.copies-a.copies||b.waste-a.waste);
+  return {byId,out,inn,bundles,dup,totalWaste:dup.reduce((s,d)=>s+d.waste,0)};
+}
+
+/* ================= 渲染 ================= */
+const NS='http://www.w3.org/2000/svg';
+const svg=document.getElementById('svg');
+const NW=132,NH=46;
+let DATA=null, A=null, g=null, XY={}, edgeList=[], edgeEls={}, nodeEls={}, cutMarks={}, selected=null;
+let scale=1, tx=0, ty=0, lastSource='';
+
+function computeLayoutFor(allIds, edgeArr){ // 对任意子图做分层布局
+  const out={},inn={};
+  allIds.forEach(id=>{out[id]=[];inn[id]=[];});
+  edgeArr.forEach(([a,b])=>{ if(out[a]&&inn[b]){out[a].push(b);inn[b].push(a);} });
+  const layer={}, indeg={};
+  allIds.forEach(id=>indeg[id]=inn[id].length);
+  const q=allIds.filter(id=>indeg[id]===0);
+  q.forEach(id=>layer[id]=0);
+  const seen=new Set(q);
+  while(q.length){
+    const n=q.shift();
+    for(const d of out[n]){
+      layer[d]=Math.max(layer[d]??0,layer[n]+1);
+      if(--indeg[d]===0&&!seen.has(d)){seen.add(d);q.push(d);}
+    }
+  }
+  allIds.forEach(id=>{if(layer[id]==null)layer[id]=0;});
+  const LX=182,LY=84;
+  const layers=[];
+  allIds.forEach(id=>{(layers[layer[id]]??=[]).push(id);});
+  const pos={};
+  layers.forEach(ids=>ids.forEach((id,i)=>pos[id]=i));
+  for(let p=0;p<3;p++) layers.forEach((ids,li)=>{
+    if(li===0)return;
+    ids.sort((a,b)=>{
+      const av=inn[a].length?inn[a].reduce((s,x)=>s+(pos[x]??0),0)/inn[a].length:pos[a];
+      const bv=inn[b].length?inn[b].reduce((s,x)=>s+(pos[x]??0),0)/inn[b].length:pos[b];
+      return av-bv;
+    });
+    ids.forEach((id,i)=>pos[id]=i);
+  });
+  const maxRows=Math.max(...layers.filter(l=>l).map(l=>l.length));
+  const xy={};
+  layers.forEach((ids,li)=>ids&&ids.forEach(id=>{
+    xy[id]={x:40+li*LX, y:40+(pos[id]+(maxRows-ids.length)/2)*LY};
+  }));
+  return xy;
+}
+function computeLayout(data){
+  return computeLayoutFor(data.modules.map(m=>m.id), data.deps);
+}
+function fitViewBox(){
+  const xs=Object.values(XY);
+  if(!xs.length)return;
+  const maxX=Math.max(...xs.map(p=>p.x))+NW+60, maxY=Math.max(...xs.map(p=>p.y))+NH+60;
+  svg.setAttribute('viewBox',`0 0 ${maxX} ${maxY}`);
+}
+function edgePathD(a,b){
+  const Ap=XY[a],Bp=XY[b];
+  const x1=Ap.x+NW,y1=Ap.y+NH/2,x2=Bp.x,y2=Bp.y+NH/2;
+  const dx=Math.max(40,Math.abs(x2-x1)/2);
+  return {d:`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`, mx:(x1+x2)/2, my:(y1+y2)/2};
+}
+function updateEdgesFor(id){
+  for(const e of edgeList){
+    if(e.a!==id&&e.b!==id)continue;
+    const {d,mx,my}=edgePathD(e.a,e.b);
+    e.el.setAttribute('d',d);
+    if(e.mk)e.mk.setAttribute('transform',`translate(${mx},${my})`);
+  }
+}
+
+function render(data,source){
+  DATA=data; A=buildAnalysis(data); lastSource=source;
+  document.getElementById('empty').style.display='none';
+  setStatus(`${data.projectName} · ${data.modules.length} 模块 / ${data.deps.length} 依赖 · ${source} ${new Date(data.scannedAt).toLocaleString()}`);
+  XY=computeLayout(data);
+  if(data.positions) for(const [id,p] of Object.entries(data.positions)) if(XY[id])XY[id]={...p};
+  svg.innerHTML=''; selected=null; filterRoot=null;
+  fitViewBox();
+  const defs=document.createElementNS(NS,'defs');
+  defs.innerHTML='<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#9aa0a8"/></marker>';
+  svg.appendChild(defs);
+  g=document.createElementNS(NS,'g'); svg.appendChild(g);
+  scale=1;tx=0;ty=0;applyT();
+  edgeList=[];edgeEls={};nodeEls={};cutMarks={};
+  const el=(t,attrs,parent)=>{const e=document.createElementNS(NS,t);for(const k in attrs)e.setAttribute(k,attrs[k]);(parent||g).appendChild(e);return e;};
+  const {byId}=A;
+
+  data.deps.forEach(([a,b])=>{
+    if(!XY[a]||!XY[b])return;
+    const {d,mx,my}=edgePathD(a,b);
+    const p=el('path',{d,class:'edge'+(byId[b].type==='hsp'?' dyn':''),'marker-end':'url(#arrow)'});
+    const mk=el('g',{class:'cutMark hidden',transform:`translate(${mx},${my})`});
+    el('circle',{r:8},mk);el('line',{x1:-3.5,y1:-3.5,x2:3.5,y2:3.5},mk);el('line',{x1:-3.5,y1:3.5,x2:3.5,y2:-3.5},mk);
+    cutMarks[a+'>'+b]=mk;
+    edgeEls[a+'>'+b]=p;
+    edgeList.push({a,b,el:p,mk});
+  });
+  data.modules.forEach(m=>{
+    const {x,y}=XY[m.id];
+    const n=el('g',{class:'node '+m.type+(m.ext?' ext':''),transform:`translate(${x},${y})`,'data-id':m.id});
+    el('rect',{width:NW,height:NH,rx:9},n);
+    const label=el('text',{x:10,y:19,class:'label'},n);
+    label.textContent=m.id.length>16?m.id.slice(0,15)+'…':m.id;
+    el('text',{x:10,y:35,class:'sub'},n).textContent=`${m.type.toUpperCase()}·${m.sub}${m.size?' · 源码≈'+m.size+'K':''}`;
+    if(m.type==='har'){
+      const d=A.dup.find(d=>d.id===m.id);
+      if(d&&d.copies>=2){
+        const b=el('g',{transform:`translate(${NW-4},2)`},n);
+        el('circle',{r:9,class:'badge'},b);
+        el('text',{'text-anchor':'middle',y:3.5,class:'badge-t'},b).textContent='×'+d.copies;
+      }
+    }
+    n.addEventListener('mousedown',ev=>startNodeDrag(ev,m.id));
+    n.addEventListener('mousemove',ev=>{if(!nodeDrag)showTip(ev,m);});
+    n.addEventListener('mouseleave',hideTip);
+    nodeEls[m.id]=n;
+  });
+  document.getElementById('nodeNames').innerHTML=data.modules.map(m=>`<option value="${m.id}">`).join('');
+  renderLists();
+}
+
+function autoLayout(){
+  if(!DATA)return;
+  if(filterRoot){ // 仅对当前筛选出的子图排版，不动其余节点、不退出筛选
+    const cut=document.getElementById('cutChk').checked;
+    const fwd=traverse(filterRoot,A.out,lvVal('fLv'),cut,false);
+    const rev=traverse(filterRoot,A.inn,lvVal('rLv'),cut,true);
+    const visN=[...new Set([filterRoot,...fwd.nodes,...rev.nodes])];
+    const edges=[...new Set([...fwd.edges,...rev.edges])].map(k=>{
+      const i=k.indexOf('>'); return [k.slice(0,i),k.slice(i+1)];
+    });
+    const xy=computeLayoutFor(visN,edges);
+    for(const id of visN){
+      XY[id]={...xy[id]};
+      nodeEls[id].setAttribute('transform',`translate(${XY[id].x},${XY[id].y})`);
+      (DATA.positions??={})[id]={...XY[id]};
+    }
+    visN.forEach(id=>updateEdgesFor(id));
+    saveData(DATA); fitViewBox();
+  }else{
+    delete DATA.positions; saveData(DATA);
+    const s=selected;
+    render(DATA,lastSource);
+    if(s&&A.byId[s])selectOnly(s);
+  }
+}
+
+/* ================= 节点拖动 ================= */
+let nodeDrag=null;
+function graphScale(){
+  const r=document.getElementById('graphWrap').getBoundingClientRect();
+  const vb=svg.viewBox.baseVal;
+  return Math.max(vb.width/r.width,vb.height/r.height);
+}
+function startNodeDrag(ev,id){
+  if(ev.button!==0)return; // 仅左键拖动；右键走 contextmenu 筛选
+  ev.stopPropagation();
+  nodeDrag={id,sx:ev.clientX,sy:ev.clientY,ox:XY[id].x,oy:XY[id].y,moved:false};
+  nodeEls[id].classList.add('dragging');
+  hideTip();
+}
+window.addEventListener('mousemove',ev=>{
+  if(!nodeDrag)return;
+  const s=graphScale()/scale;
+  const dx=(ev.clientX-nodeDrag.sx)*s, dy=(ev.clientY-nodeDrag.sy)*s;
+  if(Math.abs(dx)+Math.abs(dy)>3)nodeDrag.moved=true;
+  if(!nodeDrag.moved)return;
+  XY[nodeDrag.id]={x:nodeDrag.ox+dx, y:nodeDrag.oy+dy};
+  nodeEls[nodeDrag.id].setAttribute('transform',`translate(${XY[nodeDrag.id].x},${XY[nodeDrag.id].y})`);
+  updateEdgesFor(nodeDrag.id);
+});
+window.addEventListener('mouseup',ev=>{
+  if(!nodeDrag)return;
+  const {id,moved}=nodeDrag;
+  nodeEls[id]?.classList.remove('dragging');
+  nodeDrag=null;
+  if(moved){
+    if(DATA){(DATA.positions??={})[id]={...XY[id]}; saveData(DATA); fitViewBox();}
+  }else if(ev.button===0)selectOnly(id); // 左键未移动 = 选中查看（右键由 contextmenu 处理筛选）
+});
+
+/* ================= 双向分级追溯（聚焦模式） ================= */
+function lvVal(id){ const v=document.getElementById(id).value; return v===''?Infinity:+v; }
+function traverse(start,adj,maxLv,cut,reverse){
+  const lvl={[start]:0}, q=[start], nodes=new Set(), edges=new Set();
+  while(q.length){
+    const cur=q.shift();
+    if(lvl[cur]>=maxLv)continue;
+    if(cut&&cur!==start&&A.byId[cur].type!=='har')continue; // HSP/HAP 为边界，不展开（正反向同）
+    for(const d of adj[cur]){
+      edges.add(reverse?d+'>'+cur:cur+'>'+d);
+      if(!(d in lvl)){lvl[d]=lvl[cur]+1;nodes.add(d);q.push(d);}
+    }
+  }
+  return {nodes,edges,lvl};
+}
+function clearFocusClasses(){
+  Object.values(nodeEls).forEach(n=>n.classList.remove('hidden','root','fwd','revN','cutNode'));
+  Object.values(edgeEls).forEach(e=>e.classList.remove('hidden','fwdE','revE','cutEdge'));
+  Object.values(cutMarks).forEach(m=>m.classList.add('hidden'));
+  document.querySelectorAll('.row').forEach(r=>r.classList.remove('active'));
+}
+let filterRoot=null; // 右键筛选的根节点（决定可见范围）；selected 仅决定详情
+function clearSel(){
+  selected=null; filterRoot=null;
+  clearFocusClasses();
+  document.getElementById('detailSec').style.display='none';
+}
+function applyFocus(){
+  if(!A||!filterRoot)return;
+  clearFocusClasses();
+  const id=filterRoot;
+  const cut=document.getElementById('cutChk').checked;
+  const fwd=traverse(id,A.out,lvVal('fLv'),cut,false);
+  const rev=traverse(id,A.inn,lvVal('rLv'),cut,true);
+  const visN=new Set([id,...fwd.nodes,...rev.nodes]);
+  const visE=new Set([...fwd.edges,...rev.edges]);
+  const isBoundary=nid=>nid!==id&&A.byId[nid].type!=='har'; // HSP/HAP 均为边界
+  for(const [nid,el] of Object.entries(nodeEls)){
+    if(!visN.has(nid)){el.classList.add('hidden');continue;}
+    if(fwd.nodes.has(nid))el.classList.add('fwd');
+    if(rev.nodes.has(nid))el.classList.add('revN');
+    if(cut&&isBoundary(nid))el.classList.add('cutNode');
+  }
+  for(const [key,el] of Object.entries(edgeEls)){
+    if(!visE.has(key)){el.classList.add('hidden');continue;}
+    const gt=key.indexOf('>'), ea=key.slice(0,gt), eb=key.slice(gt+1);
+    if(fwd.edges.has(key)){
+      if(cut&&isBoundary(eb)){el.classList.add('cutEdge');cutMarks[key]?.classList.remove('hidden');}
+      else el.classList.add('fwdE');
+    }
+    if(rev.edges.has(key)){
+      if(cut&&isBoundary(ea)){el.classList.add('cutEdge');cutMarks[key]?.classList.remove('hidden');}
+      else el.classList.add('revE');
+    }
+  }
+  if(!selected||!visN.has(selected))selected=id;
+  nodeEls[selected].classList.add('root');
+  document.querySelectorAll('.row').forEach(r=>r.classList.toggle('active',r.dataset.id===selected));
+  showDetail(id,fwd,rev);
+}
+function selectFilter(id){ // 右键：筛选 + 选中
+  if(!A||!A.byId[id])return;
+  selected=id; filterRoot=id;
+  applyFocus();
+}
+function selectOnly(id,center){ // 左键：仅选中查看详情，不改变筛选
+  if(!A||!A.byId[id])return;
+  selected=id;
+  if(!filterRoot)clearFocusClasses();
+  Object.values(nodeEls).forEach(n=>n.classList.remove('root'));
+  nodeEls[id].classList.add('root');
+  document.querySelectorAll('.row').forEach(r=>r.classList.toggle('active',r.dataset.id===id));
+  const cut=document.getElementById('cutChk').checked;
+  showDetail(id,traverse(id,A.out,lvVal('fLv'),cut,false),traverse(id,A.inn,lvVal('rLv'),cut,true));
+  if(center)centerOn(id);
+}
+['fLv','rLv','cutChk'].forEach(i=>document.getElementById(i).addEventListener('change',()=>{
+  if(filterRoot)applyFocus(); else if(selected)selectOnly(selected);
+}));
+// 左键点空白不重置选择；右键点空白恢复全图
+document.getElementById('graphWrap').addEventListener('contextmenu',ev=>{
+  if(ev.target.closest('#ctrlBar'))return;
+  ev.preventDefault();
+  const n=ev.target.closest('.node');
+  if(n)selectFilter(n.getAttribute('data-id')); else clearSel();
+});
+
+/* ================= 搜索定位 ================= */
+function centerOn(id){
+  const vb=svg.viewBox.baseVal, p=XY[id];
+  if(!p)return;
+  tx=vb.width/2-(p.x+NW/2)*scale; ty=vb.height/2-(p.y+NH/2)*scale; applyT();
+}
+function doSearch(){
+  const box=document.getElementById('searchBox');
+  const v=box.value.trim(); if(!v||!A)return;
+  let id=A.byId[v]?v:DATA.modules.find(m=>m.id.toLowerCase().includes(v.toLowerCase()))?.id;
+  if(id){selectFilter(id);centerOn(id);} // 与右键行为一致：筛选 + 定位
+}
+document.getElementById('searchBox').addEventListener('change',doSearch);
+document.getElementById('searchBox').addEventListener('keydown',ev=>{if(ev.key==='Enter')doSearch();});
+
+/* ================= 详情面板 ================= */
+function showDetail(id,fwd,rev){
+  const m=A.byId[id];
+  document.getElementById('detailSec').style.display='';
+  document.getElementById('detailTitle').innerHTML=`选中：${m.id} <span class="tag ${m.type}">${m.type.toUpperCase()}${m.ext?'·三方':''}</span>`;
+  const viewInfo=`<div class="kv"><span>当前视图（按所选层级）</span><b><span style="color:var(--hap)">正向 ${fwd.nodes.size}</span> / <span style="color:var(--ok)">反向 ${rev.nodes.size}</span></b></div>`;
+  let html='';
+  if(m.type!=='har'){
+    const b=A.bundles.find(b=>b.root===id);
+    const chips=[...b.bundled].sort((a,c)=>A.byId[c].size-A.byId[a].size)
+      .map(x=>`<span class="chip" data-sel="${x}">${x}${A.byId[x].size?' ≈'+A.byId[x].size+'K':''}</span>`).join('')||'<span class="muted">无</span>';
+    const cuts=[...b.boundaries].map(x=>`<span class="chip" data-sel="${x}">✂ ${x}</span>`).join('')||'<span class="muted">无</span>';
+    html=`${viewInfo}
+      <div class="kv"><span>打包的静态模块（HAR，完整追溯）</span><b>${b.bundled.size} 个</b></div>
+      <div class="kv"><span>打入源码量（估算）</span><b>≈${b.kb} KB</b></div>
+      <div class="kv"><span>自身源码量（估算）</span><b>≈${m.size} KB</b></div>
+      <div style="margin-top:8px" class="muted">打包清单：</div><div class="modList">${chips}</div>
+      <div style="margin-top:8px" class="muted">动态边界（运行时共享，不打入）：</div><div class="modList">${cuts}</div>`;
+  }else{
+    const d=A.dup.find(d=>d.id===id);
+    const chips=d.owners.map(o=>`<span class="chip" data-sel="${o}">${o}</span>`).join('')||'<span class="muted">未被任何包打入</span>';
+    html=`${viewInfo}
+      <div class="kv"><span>${m.desc||'—'}</span><b>${m.size?'≈'+m.size+' KB':'体积未知'}</b></div>
+      <div class="kv"><span>被拷贝份数</span><b>${d.copies} 份</b></div>
+      <div class="kv"><span>重复源码量（估算）</span><b style="color:${d.waste?'var(--warn)':'var(--ok)'}">${d.waste?'≈'+d.waste+' KB':'—'}</b></div>
+      <div style="margin-top:8px" class="muted">被以下包打入：</div><div class="modList">${chips}</div>
+      ${d.copies>=2?'<div style="margin-top:8px" class="muted">优化建议：可考虑下沉到某个 HSP，由各包动态共享一份。</div>':''}`;
+  }
+  document.getElementById('detail').innerHTML=html;
+  document.querySelectorAll('#detail .chip[data-sel]').forEach(c=>{
+    c.onclick=()=>selectOnly(c.dataset.sel,true);
+    c.oncontextmenu=ev=>{ev.preventDefault();selectFilter(c.dataset.sel);};
+  });
+}
+
+/* ================= 侧栏列表 ================= */
+function renderLists(){
+  const maxKb=Math.max(1,...A.bundles.map(b=>b.kb));
+  document.getElementById('rankList').innerHTML=[...A.bundles].sort((a,b)=>b.kb-a.kb).map(b=>{
+    const m=A.byId[b.root];
+    return `<div class="row" data-id="${b.root}">
+      <span class="tag ${m.type}">${m.type.toUpperCase()}</span><span class="name">${b.root}</span>
+      <span class="bar" style="width:${Math.round(56*b.kb/maxKb)+8}px"></span>
+      <span class="num">${b.bundled.size}个/≈${b.kb}K</span></div>`;
+  }).join('');
+  const dups=A.dup.filter(d=>d.copies>=2);
+  document.getElementById('dupList').innerHTML=dups.length?dups.map(d=>`
+    <div class="row dupRow" data-id="${d.id}">
+      <span class="tag har">HAR</span><span class="name">${d.id}</span>
+      <span class="num">×${d.copies}${d.waste?' · ≈'+d.waste+'K':''}</span></div>`).join('')
+    :'<div class="muted" style="font-size:12px;padding:4px 8px">无重复打包</div>';
+  document.getElementById('wasteSum').textContent=A.totalWaste?`重复打包源码量合计 ≈${A.totalWaste} KB（估算，若全部去重）`:'';
+  document.querySelectorAll('.row[data-id]').forEach(r=>{
+    r.onclick=()=>selectOnly(r.dataset.id,true);
+    r.oncontextmenu=ev=>{ev.preventDefault();selectFilter(r.dataset.id);};
+  });
+}
+
+/* ================= 提示 / 缩放平移 ================= */
+const tip=document.getElementById('tip');
+function showTip(ev,m){
+  const wrap=document.getElementById('graphWrap').getBoundingClientRect();
+  tip.innerHTML=`<b>${m.id}</b>（${m.type.toUpperCase()} · ${m.sub}）<br>${m.desc||''}${m.size?' · 源码≈'+m.size+'KB':''}<br>依赖 ${A.out[m.id].length} 个 · 被 ${A.inn[m.id].length} 个依赖`;
+  tip.style.left=Math.min(ev.clientX-wrap.left+14,wrap.width-290)+'px';
+  tip.style.top=(ev.clientY-wrap.top+14)+'px';tip.style.opacity=1;
+}
+function hideTip(){tip.style.opacity=0;}
+function applyT(){g&&g.setAttribute('transform',`translate(${tx},${ty}) scale(${scale})`);}
+const wrap=document.getElementById('graphWrap');
+wrap.addEventListener('wheel',ev=>{
+  if(!g)return; ev.preventDefault();
+  const k=ev.deltaY<0?1.12:0.89, ns=Math.min(3,Math.max(.3,scale*k));
+  const r=wrap.getBoundingClientRect();
+  const s=graphScale();
+  const gx=(ev.clientX-r.left)*s, gy=(ev.clientY-r.top)*s;
+  tx=gx-(gx-tx)*(ns/scale); ty=gy-(gy-ty)*(ns/scale); scale=ns; applyT();
+},{passive:false});
+let pan=null;
+wrap.addEventListener('mousedown',ev=>{
+  if(!g||ev.button!==0||ev.target.closest('.node')||ev.target.closest('#ctrlBar'))return;
+  pan={x:ev.clientX,y:ev.clientY,tx,ty};wrap.classList.add('panning');
+});
+window.addEventListener('mousemove',ev=>{
+  if(!pan)return;
+  const s=graphScale();
+  tx=pan.tx+(ev.clientX-pan.x)*s;ty=pan.ty+(ev.clientY-pan.y)*s;applyT();
+});
+window.addEventListener('mouseup',()=>{pan=null;wrap.classList.remove('panning');});
+
+/* ================= 导出 ================= */
+function dl(name,content,type){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();
+}
+function exportJSON(){
+  if(!A)return alert('暂无数据，请先扫描');
+  dl('bundle-analysis.json',JSON.stringify({
+    project:DATA.projectName, scannedAt:DATA.scannedAt,
+    note:'体积为源码目录大小估算（KB），非构建产物真实体积',
+    bundles:A.bundles.map(b=>({module:b.root,type:A.byId[b.root].type,harCount:b.bundled.size,
+      staticSrcKB:b.kb,ownSrcKB:A.byId[b.root].size,bundledHars:[...b.bundled],dynamicBoundaries:[...b.boundaries]})),
+    duplication:A.dup.map(d=>({har:d.id,srcKB:A.byId[d.id].size,copies:d.copies,wasteSrcKB:d.waste,bundledBy:d.owners})),
+    totalWasteSrcKB:A.totalWaste
+  },null,2),'application/json');
+}
+function exportCSV(){
+  if(!A)return alert('暂无数据，请先扫描');
+  const rows=[['module','type','har_count','static_src_kb','own_src_kb','bundled_hars','dynamic_boundaries']];
+  A.bundles.forEach(b=>rows.push([b.root,A.byId[b.root].type,b.bundled.size,b.kb,A.byId[b.root].size,
+    [...b.bundled].join(' '),[...b.boundaries].join(' ')]));
+  rows.push([]);rows.push(['har','src_kb','copies','waste_src_kb','bundled_by']);
+  A.dup.forEach(d=>rows.push([d.id,A.byId[d.id].size,d.copies,d.waste,d.owners.join(' ')]));
+  dl('bundle-analysis.csv','﻿'+rows.map(r=>r.join(',')).join('\n'),'text/csv');
+}
+
+/* ================= 启动：优先读缓存 ================= */
+(function(){
+  const cached=loadData();
+  if(cached) render(cached,'本地缓存');
+})();
+</script>
+</body>
+</html>

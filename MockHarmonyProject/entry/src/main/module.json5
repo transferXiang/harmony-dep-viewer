@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry", // entry|feature|shared|har
+    "description": "应用主入口 UIAbility",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

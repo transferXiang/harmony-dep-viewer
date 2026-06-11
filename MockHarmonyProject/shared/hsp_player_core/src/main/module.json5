@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "hsp_player_core",
+    "type": "shared", // entry|feature|shared|har
+    "description": "播放内核动态共享包",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

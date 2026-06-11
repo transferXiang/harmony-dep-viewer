@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "hsp_account",
+    "type": "shared", // entry|feature|shared|har
+    "description": "账号体系动态共享包",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

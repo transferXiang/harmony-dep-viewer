@@ -1,0 +1,8 @@
+{
+  "module": {
+    "name": "hsp_common_ui",
+    "type": "shared", // entry|feature|shared|har
+    "description": "公共 UI 动态共享包",
+    "deviceTypes": ["phone", "tablet"],
+  }
+}

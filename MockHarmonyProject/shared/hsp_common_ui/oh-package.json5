@@ -1,0 +1,10 @@
+// 模块依赖在 dependencies 中声明
+{
+  "name": "hsp_common_ui",
+  "version": "1.0.0",
+  "description": "公共 UI 动态共享包",
+  "dependencies": {
+    "har_ui_widgets": "file:../../commons/har_ui_widgets",
+    "har_image_loader": "file:../../commons/har_image_loader",
+  },
+}
