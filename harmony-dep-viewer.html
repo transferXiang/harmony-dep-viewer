@@ -59,6 +59,7 @@
   #detail .chip:hover{border-color:var(--hsp);}
   #detail .kv{display:flex; justify-content:space-between;}
   #detail .kv b{font-variant-numeric:tabular-nums;}
+  .detailActions{display:flex; justify-content:flex-end; margin:-2px 0 8px;}
   .muted{color:var(--ink2);}
   .hint{font-size:11.5px; color:var(--ink2); padding:0 14px 10px; line-height:1.6;}
   /* SVG 节点与边 */
@@ -108,6 +109,7 @@
     <svg id="svg"></svg>
     <div id="ctrlBar">
       <button class="btn" onclick="autoLayout()">自动排版</button>
+      <button class="btn" id="restoreHiddenBtn" onclick="restoreHiddenNodes()" disabled>恢复隐藏</button>
       <span class="sep"></span>
       <span><span class="fwd">正向</span>（它依赖谁）
         <select id="fLv"><option value="0">0 级（不看）</option><option value="1">1 级</option><option value="2">2 级</option><option value="3">3 级</option><option value="" selected>到底</option></select>
@@ -193,6 +195,17 @@ function sanitizeGraphData(data){
 }
 function edgeType(edge){ return edge[2]==='dynamic'?'dynamic':'static'; }
 function edgeKey(a,b){ return a+'>'+b; }
+function escapeAttr(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function debugHide(msg,extra){ console.log('[harmony-dep-viewer hide]',msg,extra||''); }
+function visibleGraphData(data){
+  const clean=sanitizeGraphData(data);
+  const hidden=new Set(Array.isArray(clean.hiddenIds)?clean.hiddenIds:[]);
+  if(!hidden.size)return clean;
+  const modules=clean.modules.filter(m=>!hidden.has(m.id));
+  const ids=new Set(modules.map(m=>m.id));
+  const deps=clean.deps.filter(([a,b])=>ids.has(a)&&ids.has(b));
+  return {...clean, modules, deps};
+}
 
 async function scanCore(entries, projectName){
   const byPath=new Map(entries.map(e=>[e.path,e]));
@@ -447,12 +460,15 @@ function updateEdgesFor(id){
 }
 
 function render(data,source){
-  data=sanitizeGraphData(data);
-  DATA=data; A=buildAnalysis(data); lastSource=source;
+  DATA=sanitizeGraphData(data); const view=visibleGraphData(DATA);
+  A=buildAnalysis(view); lastSource=source;
   document.getElementById('empty').style.display='none';
-  setStatus(`${data.projectName} · ${data.modules.length} 模块 / ${data.deps.length} 依赖 · ${source} ${new Date(data.scannedAt).toLocaleString()}`);
-  XY=computeLayout(data);
-  if(data.positions) for(const [id,p] of Object.entries(data.positions)) if(XY[id])XY[id]={...p};
+  const hiddenCount=(DATA.hiddenIds||[]).length;
+  debugHide('render', {source, hiddenIds:DATA.hiddenIds||[], visibleModules:view.modules.length, visibleDeps:view.deps.length});
+  setStatus(`${DATA.projectName} · ${view.modules.length} 模块 / ${view.deps.length} 依赖 · ${source} ${new Date(DATA.scannedAt).toLocaleString()}${hiddenCount?' · 已隐藏 '+hiddenCount+' 模块':''}`);
+  updateHiddenControls();
+  XY=computeLayout(view);
+  if(DATA.positions) for(const [id,p] of Object.entries(DATA.positions)) if(XY[id])XY[id]={...p};
   svg.innerHTML=''; selected=null; filterRoot=null;
   fitViewBox();
   const defs=document.createElementNS(NS,'defs');
@@ -464,7 +480,7 @@ function render(data,source){
   const el=(t,attrs,parent)=>{const e=document.createElementNS(NS,t);for(const k in attrs)e.setAttribute(k,attrs[k]);(parent||g).appendChild(e);return e;};
   const {byId}=A;
 
-  data.deps.forEach((edge)=>{
+  view.deps.forEach((edge)=>{
     const [a,b]=edge;
     if(!XY[a]||!XY[b])return;
     const {d,mx,my}=edgePathD(a,b);
@@ -475,7 +491,7 @@ function render(data,source){
     edgeEls[edgeKey(a,b)]=p;
     edgeList.push({a,b,el:p,mk});
   });
-  data.modules.forEach(m=>{
+  view.modules.forEach(m=>{
     const {x,y}=XY[m.id];
     const n=el('g',{class:'node '+m.type+(m.ext?' ext':''),transform:`translate(${x},${y})`,'data-id':m.id});
     el('rect',{width:NW,height:NH,rx:9},n);
@@ -495,8 +511,14 @@ function render(data,source){
     n.addEventListener('mouseleave',hideTip);
     nodeEls[m.id]=n;
   });
-  document.getElementById('nodeNames').innerHTML=data.modules.map(m=>`<option value="${m.id}">`).join('');
+  document.getElementById('nodeNames').innerHTML=view.modules.map(m=>`<option value="${m.id}">`).join('');
   renderLists();
+}
+
+function updateHiddenControls(){
+  const n=(DATA?.hiddenIds||[]).length;
+  const btn=document.getElementById('restoreHiddenBtn');
+  if(btn){ btn.disabled=!n; btn.textContent=n?`恢复隐藏(${n})`:'恢复隐藏'; }
 }
 
 function autoLayout(){
@@ -633,6 +655,25 @@ function selectOnly(id,center){ // 左键：仅选中查看详情，不改变筛
   showDetail(id,traverse(id,A.out,lvVal('fLv'),cut,false),traverse(id,A.inn,lvVal('rLv'),cut,true));
   if(center)centerOn(id);
 }
+function hideNode(id){
+  debugHide('hide requested', {id, selected, exists:!!A?.byId?.[id], hiddenIds:DATA?.hiddenIds||[]});
+  if(!DATA||!id||!A.byId[id]){ debugHide('hide ignored', {hasData:!!DATA,id,exists:!!A?.byId?.[id]}); return; }
+  if(!confirm(`将从当前依赖图中隐藏 ${id}，并同时隐藏与它相连的依赖线。\n\n不会修改工程文件。`))return;
+  const hidden=new Set(DATA.hiddenIds||[]);
+  hidden.add(id);
+  DATA.hiddenIds=[...hidden];
+  debugHide('hide confirmed', {id, hiddenIds:DATA.hiddenIds});
+  if(DATA.positions)delete DATA.positions[id];
+  saveData(DATA);
+  render(DATA,lastSource);
+}
+function restoreHiddenNodes(){
+  if(!DATA||!(DATA.hiddenIds||[]).length)return;
+  debugHide('restore hidden nodes', {hiddenIds:DATA.hiddenIds});
+  delete DATA.hiddenIds;
+  saveData(DATA);
+  render(DATA,lastSource);
+}
 ['fLv','rLv','cutChk'].forEach(i=>document.getElementById(i).addEventListener('change',()=>{
   if(filterRoot)applyFocus(); else if(selected)selectOnly(selected);
 }));
@@ -653,7 +694,7 @@ function centerOn(id){
 function doSearch(){
   const box=document.getElementById('searchBox');
   const v=box.value.trim(); if(!v||!A)return;
-  let id=A.byId[v]?v:DATA.modules.find(m=>m.id.toLowerCase().includes(v.toLowerCase()))?.id;
+  let id=A.byId[v]?v:Object.keys(A.byId).find(id=>id.toLowerCase().includes(v.toLowerCase()));
   if(id){selectFilter(id);centerOn(id);} // 与右键行为一致：筛选 + 定位
 }
 document.getElementById('searchBox').addEventListener('change',doSearch);
@@ -665,13 +706,13 @@ function showDetail(id,fwd,rev){
   document.getElementById('detailSec').style.display='';
   document.getElementById('detailTitle').innerHTML=`选中：${m.id} <span class="tag ${m.type}">${m.type.toUpperCase()}${m.ext?'·三方':''}</span>`;
   const viewInfo=`<div class="kv"><span>当前视图（按所选层级）</span><b><span style="color:var(--hap)">正向 ${fwd.nodes.size}</span> / <span style="color:var(--ok)">反向 ${rev.nodes.size}</span></b></div>`;
-  let html='';
+  let html=`<div class="detailActions"><button class="btn" data-hide-id="${escapeAttr(id)}">隐藏当前节点</button></div>`;
   if(m.type!=='har'){
     const b=A.bundles.find(b=>b.root===id);
     const chips=[...b.bundled].sort((a,c)=>A.byId[c].size-A.byId[a].size)
       .map(x=>`<span class="chip" data-sel="${x}">${x}${A.byId[x].size?' ≈'+A.byId[x].size+'K':''}</span>`).join('')||'<span class="muted">无</span>';
     const cuts=[...b.boundaries].map(x=>`<span class="chip" data-sel="${x}">✂ ${x}</span>`).join('')||'<span class="muted">无</span>';
-    html=`${viewInfo}
+    html+=`${viewInfo}
       <div class="kv"><span>打包的静态模块（HAR，完整追溯）</span><b>${b.bundled.size} 个</b></div>
       <div class="kv"><span>打入源码量（估算）</span><b>≈${b.kb} KB</b></div>
       <div class="kv"><span>自身源码量（估算）</span><b>≈${m.size} KB</b></div>
@@ -680,7 +721,7 @@ function showDetail(id,fwd,rev){
   }else{
     const d=A.dup.find(d=>d.id===id);
     const chips=d.owners.map(o=>`<span class="chip" data-sel="${o}">${o}</span>`).join('')||'<span class="muted">未被任何包打入</span>';
-    html=`${viewInfo}
+    html+=`${viewInfo}
       <div class="kv"><span>${m.desc||'—'}</span><b>${m.size?'≈'+m.size+' KB':'体积未知'}</b></div>
       <div class="kv"><span>被拷贝份数</span><b>${d.copies} 份</b></div>
       <div class="kv"><span>重复源码量（估算）</span><b style="color:${d.waste?'var(--warn)':'var(--ok)'}">${d.waste?'≈'+d.waste+' KB':'—'}</b></div>
@@ -688,6 +729,7 @@ function showDetail(id,fwd,rev){
       ${d.copies>=2?'<div style="margin-top:8px" class="muted">优化建议：可考虑下沉到某个 HSP，由各包动态共享一份。</div>':''}`;
   }
   document.getElementById('detail').innerHTML=html;
+  document.querySelector('[data-hide-id]')?.addEventListener('click',ev=>hideNode(ev.currentTarget.dataset.hideId));
   document.querySelectorAll('#detail .chip[data-sel]').forEach(c=>{
     c.onclick=()=>selectOnly(c.dataset.sel,true);
     c.oncontextmenu=ev=>{ev.preventDefault();selectFilter(c.dataset.sel);};

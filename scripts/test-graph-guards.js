@@ -62,6 +62,35 @@ assert.deepStrictEqual(raw.deps, [
 
 console.log('graph guard tests passed');
 
+assert.strictEqual(typeof context.visibleGraphData, 'function', 'visibleGraphData should be available');
+const hiddenSource = {
+  projectName: 'hidden fixture',
+  scannedAt: '2026-06-12T00:00:00.000Z',
+  modules: [
+    { id: 'entry', type: 'hap' },
+    { id: 'feature_video', type: 'hap' },
+    { id: 'har_utils', type: 'har' },
+  ],
+  deps: [
+    ['entry', 'feature_video', 'dynamic'],
+    ['entry', 'har_utils'],
+    ['feature_video', 'har_utils'],
+  ],
+  hiddenIds: ['feature_video'],
+  warnings: [],
+};
+const visible = context.visibleGraphData(hiddenSource);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(visible.modules.map((m) => m.id))), ['entry', 'har_utils']);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(visible.deps)), [['entry', 'har_utils']]);
+assert.deepStrictEqual(hiddenSource.modules.map((m) => m.id), ['entry', 'feature_video', 'har_utils']);
+assert.deepStrictEqual(hiddenSource.deps, [
+  ['entry', 'feature_video', 'dynamic'],
+  ['entry', 'har_utils'],
+  ['feature_video', 'har_utils'],
+]);
+
+console.log('hidden node filter tests passed');
+
 const scan = await context.scanCore([
   entry('build-profile.json5', json5({
     modules: [
@@ -168,6 +197,16 @@ assert(!applyFocusSource.includes("classList.add('cutEdge')"), 'boundary edges s
 assert(!applyFocusSource.includes('classList.remove(\'hidden\')'), 'boundary edges should not show cut marks');
 
 console.log('focus boundary edge style tests passed');
+
+assert(html.includes('id="restoreHiddenBtn"'), 'restore hidden button should be present');
+assert(html.includes('function hideNode(id)'), 'explicit hideNode action should be present');
+assert(html.includes('function restoreHiddenNodes()'), 'restoreHiddenNodes action should be present');
+assert(html.includes('data-hide-id='), 'detail hide button should carry the displayed node id');
+assert(html.includes("querySelector('[data-hide-id]')"), 'detail hide button should be wired after rendering');
+assert(!html.includes('onclick="hideNode('), 'detail hide button should not use fragile inline quoted JavaScript');
+assert(html.includes('不会修改工程文件'), 'hide confirmation should clarify files are not modified');
+
+console.log('hidden node UI tests passed');
 }
 
 main().catch((err) => {
