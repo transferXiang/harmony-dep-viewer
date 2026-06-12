@@ -188,9 +188,11 @@ function sanitizeGraphData(data){
   const ids=new Set(modules.map(m=>m.id));
   const deps=(Array.isArray(data.deps)?data.deps:[])
     .filter(e=>Array.isArray(e)&&ids.has(e[0])&&ids.has(e[1]))
-    .map(([a,b])=>[a,b]);
+    .map(([a,b,type])=>type==='dynamic'?[a,b,'dynamic']:[a,b]);
   return {...data, modules, deps, warnings:Array.isArray(data.warnings)?data.warnings:[]};
 }
+function edgeType(edge){ return edge[2]==='dynamic'?'dynamic':'static'; }
+function edgeKey(a,b){ return a+'>'+b; }
 
 async function scanCore(entries, projectName){
   const byPath=new Map(entries.map(e=>[e.path,e]));
@@ -216,24 +218,32 @@ async function scanCore(entries, projectName){
     const type=mtype==='shared'?'hsp':(mtype==='har'?'har':'hap');
     const sizeKB=Math.round(entries.reduce((s,e)=>e.path.startsWith(m.src+'/')?s+e.size:s,0)/1024);
     const node={id:m.name, type, sub:mtype, size:sizeKB, desc:pkg.description||mj.description||'',
-                _deps:pkg.dependencies||{}, _src:m.src};
+                _deps:pkg.dependencies||{}, _dynDeps:pkg.dynamicDependencies||{}, _src:m.src};
     modules.push(node); byDir.set(m.src,node); if(pkg.name)byPkg.set(pkg.name,node);
   }
   const externals=new Map();
-  for(const m of modules){
-    for(const [dn,spec] of Object.entries(m._deps)){
-      let target=null;
-      if(typeof spec==='string'&&spec.startsWith('file:'))
-        target=byDir.get(joinPath(m._src,spec.slice(5)));
-      if(!target) target=byPkg.get(dn);
-      if(!target){
-        target=externals.get(dn);
-        if(!target){ target={id:dn,type:'har',sub:'ohpm',size:0,desc:'三方库 '+spec,ext:true}; externals.set(dn,target); }
-      }
-      if(target.id===m.id){ warnings.push(`模块 ${m.id}: 依赖自身，已忽略`); continue; }
-      deps.push([m.id,target.id]);
+  const resolveTarget=(m,dn,spec)=>{
+    let target=null;
+    if(typeof spec==='string'&&spec.startsWith('file:'))
+      target=byDir.get(joinPath(m._src,spec.slice(5)));
+    if(!target) target=byPkg.get(dn);
+    if(!target){
+      target=externals.get(dn);
+      if(!target){ target={id:dn,type:'har',sub:'ohpm',size:0,desc:'三方库 '+spec,ext:true}; externals.set(dn,target); }
     }
-    delete m._deps; delete m._src;
+    return target;
+  };
+  const addDeps=(m,depsObj,type)=>{
+    for(const [dn,spec] of Object.entries(depsObj||{})){
+      const target=resolveTarget(m,dn,spec);
+      if(target.id===m.id){ warnings.push(`模块 ${m.id}: 依赖自身，已忽略`); continue; }
+      deps.push(type==='dynamic'?[m.id,target.id,'dynamic']:[m.id,target.id]);
+    }
+  };
+  for(const m of modules){
+    addDeps(m,m._deps,'static');
+    addDeps(m,m._dynDeps,'dynamic');
+    delete m._deps; delete m._dynDeps; delete m._src;
   }
   modules.push(...externals.values());
   const out={}; modules.forEach(x=>out[x.id]=[]); deps.forEach(([a,b])=>out[a].push(b));
@@ -305,15 +315,22 @@ async function finishScan(entries,name){
 /* ================= 打包分析（HAR 追溯 / HSP 截断） ================= */
 function buildAnalysis(data){
   const byId=Object.fromEntries(data.modules.map(m=>[m.id,m]));
-  const out={},inn={};
-  data.modules.forEach(m=>{out[m.id]=[];inn[m.id]=[];});
-  data.deps.forEach(([a,b])=>{ if(out[a]&&inn[b]){out[a].push(b);inn[b].push(a);} });
+  const out={},inn={},staticOut={},dynamicOut={};
+  data.modules.forEach(m=>{out[m.id]=[];inn[m.id]=[];staticOut[m.id]=[];dynamicOut[m.id]=[];});
+  data.deps.forEach((edge)=>{
+    const [a,b]=edge;
+    if(out[a]&&inn[b]){
+      out[a].push(b);inn[b].push(a);
+      (edgeType(edge)==='dynamic'?dynamicOut:staticOut)[a].push(b);
+    }
+  });
   function analyze(rootId){
     const bundled=new Set(),boundaries=new Set();
     const visited=new Set([rootId]),stack=[rootId];
     while(stack.length){
       const cur=stack.pop();
-      for(const dep of out[cur]){
+      for(const dep of dynamicOut[cur]) boundaries.add(dep);
+      for(const dep of staticOut[cur]){
         if(byId[dep].type==='har'){
           bundled.add(dep);
           if(!visited.has(dep)){visited.add(dep);stack.push(dep);}
@@ -447,14 +464,15 @@ function render(data,source){
   const el=(t,attrs,parent)=>{const e=document.createElementNS(NS,t);for(const k in attrs)e.setAttribute(k,attrs[k]);(parent||g).appendChild(e);return e;};
   const {byId}=A;
 
-  data.deps.forEach(([a,b])=>{
+  data.deps.forEach((edge)=>{
+    const [a,b]=edge;
     if(!XY[a]||!XY[b])return;
     const {d,mx,my}=edgePathD(a,b);
-    const p=el('path',{d,class:'edge'+(byId[b].type==='hsp'?' dyn':''),'marker-end':'url(#arrow)'});
+    const p=el('path',{d,class:'edge'+(edgeType(edge)==='dynamic'?' dyn':''),'marker-end':'url(#arrow)'});
     const mk=el('g',{class:'cutMark hidden',transform:`translate(${mx},${my})`});
     el('circle',{r:8},mk);el('line',{x1:-3.5,y1:-3.5,x2:3.5,y2:3.5},mk);el('line',{x1:-3.5,y1:3.5,x2:3.5,y2:-3.5},mk);
-    cutMarks[a+'>'+b]=mk;
-    edgeEls[a+'>'+b]=p;
+    cutMarks[edgeKey(a,b)]=mk;
+    edgeEls[edgeKey(a,b)]=p;
     edgeList.push({a,b,el:p,mk});
   });
   data.modules.forEach(m=>{
@@ -588,12 +606,10 @@ function applyFocus(){
     if(!visE.has(key)){el.classList.add('hidden');continue;}
     const gt=key.indexOf('>'), ea=key.slice(0,gt), eb=key.slice(gt+1);
     if(fwd.edges.has(key)){
-      if(cut&&isBoundary(eb)){el.classList.add('cutEdge');cutMarks[key]?.classList.remove('hidden');}
-      else el.classList.add('fwdE');
+      el.classList.add('fwdE');
     }
     if(rev.edges.has(key)){
-      if(cut&&isBoundary(ea)){el.classList.add('cutEdge');cutMarks[key]?.classList.remove('hidden');}
-      else el.classList.add('revE');
+      el.classList.add('revE');
     }
   }
   if(!selected||!visN.has(selected))selected=id;

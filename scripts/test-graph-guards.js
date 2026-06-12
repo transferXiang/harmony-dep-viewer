@@ -14,6 +14,10 @@ vm.createContext(context);
 assert(start >= 0 && end >= 0, 'Could not find SCAN-CORE section in harmony-dep-viewer.html');
 vm.runInContext(html.slice(start, end + endMarker.length), context, { filename: 'scan-core.js' });
 
+const entry = (path, text) => ({ path, size: Buffer.byteLength(text), text: async () => text });
+const json5 = (value) => JSON.stringify(value, null, 2);
+
+async function main() {
 assert.strictEqual(typeof context.sanitizeGraphData, 'function', 'sanitizeGraphData should be available');
 
 const raw = {
@@ -29,6 +33,9 @@ const raw = {
     ['missing_source', 'har_utils'],
     ['missing_source', 'missing_target'],
     ['entry'],
+    ['entry', 'missing_target', 'dynamic'],
+    ['missing_source', 'har_utils', 'dynamic'],
+    ['entry', 'har_utils', 'dynamic'],
     [],
   ],
   warnings: [],
@@ -37,17 +44,54 @@ const raw = {
 const clean = context.sanitizeGraphData(raw);
 const cleanDeps = JSON.parse(JSON.stringify(clean.deps));
 
-assert.deepStrictEqual(cleanDeps, [['entry', 'har_utils']]);
+assert.deepStrictEqual(cleanDeps, [
+  ['entry', 'har_utils'],
+  ['entry', 'har_utils', 'dynamic'],
+]);
 assert.deepStrictEqual(raw.deps, [
   ['entry', 'har_utils'],
   ['entry', 'missing_target'],
   ['missing_source', 'har_utils'],
   ['missing_source', 'missing_target'],
   ['entry'],
+  ['entry', 'missing_target', 'dynamic'],
+  ['missing_source', 'har_utils', 'dynamic'],
+  ['entry', 'har_utils', 'dynamic'],
   [],
 ]);
 
 console.log('graph guard tests passed');
+
+const scan = await context.scanCore([
+  entry('build-profile.json5', json5({
+    modules: [
+      { name: 'entry', srcPath: 'entry' },
+      { name: 'feature_video', srcPath: 'feature_video' },
+      { name: 'har_utils', srcPath: 'commons/har_utils' },
+    ],
+  })),
+  entry('entry/src/main/module.json5', json5({ module: { type: 'entry' } })),
+  entry('entry/oh-package.json5', json5({
+    name: 'entry',
+    dependencies: {
+      har_utils: 'file:../commons/har_utils',
+    },
+    dynamicDependencies: {
+      feature_video: 'file:../feature_video',
+    },
+  })),
+  entry('feature_video/src/main/module.json5', json5({ module: { type: 'feature' } })),
+  entry('feature_video/oh-package.json5', json5({ name: 'feature_video' })),
+  entry('commons/har_utils/src/main/module.json5', json5({ module: { type: 'har' } })),
+  entry('commons/har_utils/oh-package.json5', json5({ name: 'har_utils' })),
+], 'dynamic fixture');
+
+assert.deepStrictEqual(JSON.parse(JSON.stringify(scan.deps)), [
+  ['entry', 'har_utils'],
+  ['entry', 'feature_video', 'dynamic'],
+]);
+
+console.log('dynamic dependency scan tests passed');
 
 const renderStart = html.indexOf('const NW=');
 const renderEnd = html.indexOf('function computeLayoutFor', renderStart);
@@ -92,3 +136,41 @@ assert.deepStrictEqual(points(node(0, 160), node(0, 0)), {
 });
 
 console.log('edge routing tests passed');
+
+const analysisStart = html.indexOf('function buildAnalysis');
+const analysisEnd = html.indexOf('/* ================= 渲染 ================= */', analysisStart);
+assert(analysisStart >= 0 && analysisEnd >= 0, 'Could not find buildAnalysis section');
+vm.runInContext(html.slice(analysisStart, analysisEnd), context, { filename: 'analysis.js' });
+
+const analysis = context.buildAnalysis({
+  modules: [
+    { id: 'entry', type: 'hap', size: 1 },
+    { id: 'har_static', type: 'har', size: 10 },
+    { id: 'har_dynamic', type: 'har', size: 20 },
+  ],
+  deps: [
+    ['entry', 'har_static'],
+    ['entry', 'har_dynamic', 'dynamic'],
+  ],
+});
+const entryBundle = analysis.bundles.find((b) => b.root === 'entry');
+assert.deepStrictEqual([...entryBundle.bundled], ['har_static']);
+assert.deepStrictEqual([...entryBundle.boundaries], ['har_dynamic']);
+assert.strictEqual(entryBundle.kb, 10);
+
+console.log('dynamic analysis tests passed');
+
+const focusStart = html.indexOf('function applyFocus');
+const focusEnd = html.indexOf('function selectFilter', focusStart);
+assert(focusStart >= 0 && focusEnd >= 0, 'Could not find applyFocus section');
+const applyFocusSource = html.slice(focusStart, focusEnd);
+assert(!applyFocusSource.includes("classList.add('cutEdge')"), 'boundary edges should not use cutEdge styling');
+assert(!applyFocusSource.includes('classList.remove(\'hidden\')'), 'boundary edges should not show cut marks');
+
+console.log('focus boundary edge style tests passed');
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

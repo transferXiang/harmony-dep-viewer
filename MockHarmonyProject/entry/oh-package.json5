@@ -1,4 +1,4 @@
-// 模块依赖在 dependencies 中声明
+// 模块依赖在 dependencies / dynamicDependencies 中声明
 {
   "name": "entry",
   "version": "1.0.0",
@@ -9,5 +9,9 @@
     "har_analytics": "file:../commons/har_analytics",
     "har_ui_widgets": "file:../commons/har_ui_widgets",
     "@ohos/lottie": "^2.0.5", // ohpm 三方库
+  },
+  "dynamicDependencies": {
+    "feature_video": "file:../feature_video",
+    "feature_live": "file:../feature_live",
   },
 }

@@ -25,9 +25,9 @@ The pipeline is linear and lives inside the one file. When changing parsing or r
 
 1. **Scan** (`scanProject` → directory handle / FileList) collects every file under the chosen root into a `Map<relativePath, fileEntry>` keyed by path relative to root.
 2. **Parse** reads `build-profile.json5` from that map, then for each declared module reads `<src>/oh-package.json5` and `<src>/src/main/module.json5`. JSON5 is parsed by a local `parseJSON5` (no library); be careful adding fields that need trailing-comma or comment handling beyond what it already supports.
-3. **Model** produces `DATA = { nodes, edges, warnings }`. Node `kind` is `hap | hsp | har` derived from `module.json5`'s `module.type` (`entry`/`feature` → HAP, `shared` → HSP, `har` → HAR). Edges come from `oh-package.json5`'s `dependencies`; `file:` deps become internal edges, anything else (e.g. `@ohos/lottie`) becomes an `ext` node drawn dashed.
+3. **Model** produces `DATA = { nodes, edges, warnings }`. Node `kind` is `hap | hsp | har` derived from `module.json5`'s `module.type` (`entry`/`feature` → HAP, `shared` → HSP, `har` → HAR). Edges come from `oh-package.json5`'s `dependencies` and `dynamicDependencies`; `file:` deps become internal edges, anything else (e.g. `@ohos/lottie`) becomes an `ext` node. Dynamic edges are stored as `[source, target, "dynamic"]`; legacy/static edges may remain `[source, target]`.
 4. **Cache** via `saveData(DATA)` / `loadData()` → `localStorage`. On reload the graph rebuilds from cache without re-scanning.
-5. **Render** (`autoLayout` + SVG node/edge generation) draws the graph into `<svg id="svg">`. Focus mode uses the `fLv` (forward / 它依赖谁) and `rLv` (reverse / 谁依赖它) selects plus the "遇 HSP/HAP 截断" checkbox to colour/cut the BFS traversal. Edge style: solid = static (HAR-style), dashed = dynamic (HSP-style).
+5. **Render** (`autoLayout` + SVG node/edge generation) draws the graph into `<svg id="svg">`. Focus mode uses the `fLv` (forward / 它依赖谁) and `rLv` (reverse / 谁依赖它) selects plus the "遇 HSP/HAP 截断" checkbox to colour/cut the BFS traversal. Edge style: solid = `dependencies`, dashed = `dynamicDependencies`.
 
 Styling conventions are baked into CSS variables at the top of `<style>` (`--hap`, `--hsp`, `--har`, plus `-bg` variants). Reuse those rather than hardcoding colours.
 
@@ -37,7 +37,7 @@ The fixture exists to exercise the four module taxonomy levels and the cross-tie
 
 - `AppScope/app.json5` — bundle metadata.
 - `build-profile.json5` — workspace-level module registry; the viewer **requires** this file at the project root.
-- `entry/` — HAP, the app's UIAbility entry. Depends on HSPs and HARs.
+- `entry/` — HAP, the app's UIAbility entry. Depends statically on HSPs/HARs and dynamically on the feature HAPs.
 - `feature_video/`, `feature_live/` — feature HAPs (按需安装), each depending on `hsp_player_core` plus their own HARs.
 - `shared/hsp_*` — HSPs (动态共享包). `hsp_player_core` depends on `hsp_common_ui`, demonstrating HSP→HSP edges.
 - `commons/har_*` — HARs (静态库) forming a layered DAG: leaf `har_utils`/`har_crypto` → mid `har_logger`/`har_network`/`har_storage`/`har_ui_widgets` → upper `har_analytics`/`har_danmaku`/`har_image_loader`.
