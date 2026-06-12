@@ -782,10 +782,16 @@ function showDetail(id,fwd,rev){
 }
 // Event delegation — attached once. Survives any innerHTML rewrite of #detail
 // since the listener lives on the parent container, not the button itself.
-document.getElementById('detail').addEventListener('click',ev=>{
-  const btn=ev.target.closest('[data-hide-id]');
-  if(btn) hideNode(btn.dataset.hideId);
-});
+(function attachHideDelegation(){
+  const detail=document.getElementById('detail');
+  debugHide('attach delegation', {detailFound:!!detail});
+  if(!detail)return;
+  detail.addEventListener('click',ev=>{
+    debugHide('detail click', {target:ev.target.tagName, hasHideAttr:!!ev.target.closest('[data-hide-id]')});
+    const btn=ev.target.closest('[data-hide-id]');
+    if(btn) hideNode(btn.dataset.hideId);
+  });
+})();
 
 /* ================= 侧栏列表 ================= */
 function renderLists(){
