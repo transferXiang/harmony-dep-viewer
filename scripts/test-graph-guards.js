@@ -91,6 +91,82 @@ assert.deepStrictEqual(hiddenSource.deps, [
 
 console.log('hidden node filter tests passed');
 
+assert.strictEqual(typeof context.findOrphans, 'function', 'findOrphans should be available');
+
+const orphans = (fixture, seeds) => JSON.parse(JSON.stringify(context.findOrphans(fixture.modules, fixture.deps, seeds))).sort();
+
+// Basic cascade: hiding entry orphans an external lib it solely consumed.
+const orphanFixture1 = {
+  modules: [
+    { id: 'entry', type: 'hap' },
+    { id: 'har_utils', type: 'har' },
+    { id: '@ohos/lottie', type: 'har' },
+  ],
+  deps: [
+    ['entry', 'har_utils'],
+    ['entry', '@ohos/lottie'],
+  ],
+};
+assert.deepStrictEqual(orphans(orphanFixture1, ['entry']), ['@ohos/lottie', 'har_utils']);
+
+// Multi-fix-point cascade: hiding entry should sweep the whole chain.
+const orphanFixture2 = {
+  modules: [
+    { id: 'entry', type: 'hap' },
+    { id: 'hsp_player', type: 'hsp' },
+    { id: 'har_network', type: 'har' },
+    { id: 'har_utils', type: 'har' },
+  ],
+  deps: [
+    ['entry', 'hsp_player'],
+    ['hsp_player', 'har_network'],
+    ['har_network', 'har_utils'],
+  ],
+};
+assert.deepStrictEqual(orphans(orphanFixture2, ['entry']), ['har_network', 'har_utils', 'hsp_player']);
+
+// HAPs are never auto-hidden even with in-degree 0.
+const orphanFixture3 = {
+  modules: [
+    { id: 'entry', type: 'hap' },
+    { id: 'feature_video', type: 'hap' },
+    { id: 'har_utils', type: 'har' },
+  ],
+  deps: [
+    ['entry', 'feature_video', 'dynamic'],
+    ['feature_video', 'har_utils'],
+  ],
+};
+assert.deepStrictEqual(orphans(orphanFixture3, ['entry']), []);
+
+// A HAR consumed by two HAPs is not orphaned when only one is hidden.
+const orphanFixture4 = {
+  modules: [
+    { id: 'entry', type: 'hap' },
+    { id: 'feature_live', type: 'hap' },
+    { id: 'har_analytics', type: 'har' },
+  ],
+  deps: [
+    ['entry', 'har_analytics'],
+    ['feature_live', 'har_analytics'],
+  ],
+};
+assert.deepStrictEqual(orphans(orphanFixture4, ['entry']), []);
+
+// Seed IDs are excluded from the returned cascade list.
+const orphanFixture5 = {
+  modules: [
+    { id: 'entry', type: 'hap' },
+    { id: 'har_utils', type: 'har' },
+  ],
+  deps: [['entry', 'har_utils']],
+};
+const cascade5 = orphans(orphanFixture5, ['entry']);
+assert(!cascade5.includes('entry'), 'seeds must not appear in returned cascade');
+assert.deepStrictEqual(cascade5, ['har_utils']);
+
+console.log('findOrphans cascade tests passed');
+
 const scan = await context.scanCore([
   entry('build-profile.json5', json5({
     modules: [

@@ -206,6 +206,43 @@ function visibleGraphData(data){
   const deps=clean.deps.filter(([a,b])=>ids.has(a)&&ids.has(b));
   return {...clean, modules, deps};
 }
+/**
+ * Compute the orphan-cascade triggered by hiding `seedIds`.
+ *
+ * Orphan rule (definition B): a module is orphaned if, after hiding,
+ *   - it has in-degree 0 (no other module depends on it), AND
+ *   - it is NOT a HAP (HAPs are entry points; never auto-hidden).
+ *
+ * The cascade is iterated to a fix-point: removing an orphan can in
+ * turn orphan others (e.g. a HAR only consumed by a now-removed HSP).
+ *
+ * Pure function over (modules, deps). Returns the set of *additional*
+ * IDs that should be hidden (i.e. excludes the seeds themselves).
+ */
+function findOrphans(modules, deps, seedIds){
+  const seeds=new Set(seedIds||[]);
+  const typeById=new Map((modules||[]).map(m=>[m.id,m.type]));
+  const hidden=new Set(seeds);
+  while(true){
+    const inDeg=new Map();
+    for(const m of modules) if(!hidden.has(m.id)) inDeg.set(m.id,0);
+    for(const e of deps){
+      if(!Array.isArray(e))continue;
+      const [a,b]=e;
+      if(hidden.has(a)||hidden.has(b))continue;
+      if(inDeg.has(b)) inDeg.set(b,inDeg.get(b)+1);
+    }
+    let grew=false;
+    for(const [id,deg] of inDeg){
+      if(deg===0 && typeById.get(id)!=='hap'){
+        hidden.add(id); grew=true;
+      }
+    }
+    if(!grew)break;
+  }
+  for(const s of seeds) hidden.delete(s);
+  return [...hidden];
+}
 
 async function scanCore(entries, projectName){
   const byPath=new Map(entries.map(e=>[e.path,e]));
@@ -658,12 +695,21 @@ function selectOnly(id,center){ // 左键：仅选中查看详情，不改变筛
 function hideNode(id){
   debugHide('hide requested', {id, selected, exists:!!A?.byId?.[id], hiddenIds:DATA?.hiddenIds||[]});
   if(!DATA||!id||!A.byId[id]){ debugHide('hide ignored', {hasData:!!DATA,id,exists:!!A?.byId?.[id]}); return; }
-  if(!confirm(`将从当前依赖图中隐藏 ${id}，并同时隐藏与它相连的依赖线。\n\n不会修改工程文件。`))return;
+  // Compute cascade over the currently-visible graph (already excludes prior hiddenIds).
+  const visible=visibleGraphData(DATA);
+  const cascade=findOrphans(visible.modules, visible.deps, [id]);
+  const previewMax=8;
+  const previewIds=cascade.slice(0,previewMax);
+  const cascadeMsg=cascade.length
+    ? `\n\n由此变成游离的 ${cascade.length} 个节点也会一并隐藏：\n  ${previewIds.join(', ')}${cascade.length>previewMax?` …（共 ${cascade.length} 个）`:''}`
+    : '';
+  if(!confirm(`将从当前依赖图中隐藏 ${id}，并同时隐藏与它相连的依赖线。${cascadeMsg}\n\n不会修改工程文件。`))return;
   const hidden=new Set(DATA.hiddenIds||[]);
   hidden.add(id);
+  for(const x of cascade) hidden.add(x);
   DATA.hiddenIds=[...hidden];
-  debugHide('hide confirmed', {id, hiddenIds:DATA.hiddenIds});
-  if(DATA.positions)delete DATA.positions[id];
+  debugHide('hide confirmed', {id, cascade, hiddenIds:DATA.hiddenIds});
+  if(DATA.positions){ delete DATA.positions[id]; for(const x of cascade) delete DATA.positions[x]; }
   saveData(DATA);
   render(DATA,lastSource);
 }
