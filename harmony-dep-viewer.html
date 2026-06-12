@@ -183,6 +183,14 @@ function normPath(p){
   return seg.join('/');
 }
 function joinPath(baseDir,rel){ return normPath(baseDir+'/'+rel); }
+function sanitizeGraphData(data){
+  const modules=Array.isArray(data.modules)?data.modules:[];
+  const ids=new Set(modules.map(m=>m.id));
+  const deps=(Array.isArray(data.deps)?data.deps:[])
+    .filter(e=>Array.isArray(e)&&ids.has(e[0])&&ids.has(e[1]))
+    .map(([a,b])=>[a,b]);
+  return {...data, modules, deps, warnings:Array.isArray(data.warnings)?data.warnings:[]};
+}
 
 async function scanCore(entries, projectName){
   const byPath=new Map(entries.map(e=>[e.path,e]));
@@ -237,7 +245,7 @@ async function scanCore(entries, projectName){
       state[id]='ing'; for(const d of out[id])visit(d,path.concat(id)); state[id]='done';
     } })();
   if(cyc.length) warnings.push('检测到循环依赖：'+cyc[0]);
-  return {projectName, scannedAt:new Date().toISOString(), modules, deps, warnings};
+  return sanitizeGraphData({projectName, scannedAt:new Date().toISOString(), modules, deps, warnings});
 }
 /* SCAN-CORE-END */
 
@@ -330,6 +338,31 @@ const NW=132,NH=46;
 let DATA=null, A=null, g=null, XY={}, edgeList=[], edgeEls={}, nodeEls={}, cutMarks={}, selected=null;
 let scale=1, tx=0, ty=0, lastSource='';
 
+function edgeConnectionPoints(Ap,Bp){
+  const ac={x:Ap.x+NW/2,y:Ap.y+NH/2}, bc={x:Bp.x+NW/2,y:Bp.y+NH/2};
+  const dx=bc.x-ac.x, dy=bc.y-ac.y;
+  if(Math.abs(dx)>=Math.abs(dy)){
+    const dir=dx>=0?1:-1;
+    return {
+      x1:dir>0?Ap.x+NW:Ap.x,
+      y1:ac.y,
+      x2:dir>0?Bp.x:Bp.x+NW,
+      y2:bc.y,
+      axis:'x',
+      dir
+    };
+  }
+  const dir=dy>=0?1:-1;
+  return {
+    x1:ac.x,
+    y1:dir>0?Ap.y+NH:Ap.y,
+    x2:bc.x,
+    y2:dir>0?Bp.y:Bp.y+NH,
+    axis:'y',
+    dir
+  };
+}
+
 function computeLayoutFor(allIds, edgeArr){ // 对任意子图做分层布局
   const out={},inn={};
   allIds.forEach(id=>{out[id]=[];inn[id]=[];});
@@ -379,9 +412,13 @@ function fitViewBox(){
 }
 function edgePathD(a,b){
   const Ap=XY[a],Bp=XY[b];
-  const x1=Ap.x+NW,y1=Ap.y+NH/2,x2=Bp.x,y2=Bp.y+NH/2;
-  const dx=Math.max(40,Math.abs(x2-x1)/2);
-  return {d:`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`, mx:(x1+x2)/2, my:(y1+y2)/2};
+  const {x1,y1,x2,y2,axis,dir}=edgeConnectionPoints(Ap,Bp);
+  const bend=Math.max(40,(axis==='x'?Math.abs(x2-x1):Math.abs(y2-y1))/2);
+  const c1x=axis==='x'?x1+bend*dir:x1;
+  const c1y=axis==='y'?y1+bend*dir:y1;
+  const c2x=axis==='x'?x2-bend*dir:x2;
+  const c2y=axis==='y'?y2-bend*dir:y2;
+  return {d:`M${x1},${y1} C${c1x},${c1y} ${c2x},${c2y} ${x2},${y2}`, mx:(x1+x2)/2, my:(y1+y2)/2};
 }
 function updateEdgesFor(id){
   for(const e of edgeList){
@@ -393,6 +430,7 @@ function updateEdgesFor(id){
 }
 
 function render(data,source){
+  data=sanitizeGraphData(data);
   DATA=data; A=buildAnalysis(data); lastSource=source;
   document.getElementById('empty').style.display='none';
   setStatus(`${data.projectName} · ${data.modules.length} 模块 / ${data.deps.length} 依赖 · ${source} ${new Date(data.scannedAt).toLocaleString()}`);
