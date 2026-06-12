@@ -775,12 +775,17 @@ function showDetail(id,fwd,rev){
       ${d.copies>=2?'<div style="margin-top:8px" class="muted">优化建议：可考虑下沉到某个 HSP，由各包动态共享一份。</div>':''}`;
   }
   document.getElementById('detail').innerHTML=html;
-  document.querySelector('[data-hide-id]')?.addEventListener('click',ev=>hideNode(ev.currentTarget.dataset.hideId));
   document.querySelectorAll('#detail .chip[data-sel]').forEach(c=>{
     c.onclick=()=>selectOnly(c.dataset.sel,true);
     c.oncontextmenu=ev=>{ev.preventDefault();selectFilter(c.dataset.sel);};
   });
 }
+// Event delegation — attached once. Survives any innerHTML rewrite of #detail
+// since the listener lives on the parent container, not the button itself.
+document.getElementById('detail').addEventListener('click',ev=>{
+  const btn=ev.target.closest('[data-hide-id]');
+  if(btn) hideNode(btn.dataset.hideId);
+});
 
 /* ================= 侧栏列表 ================= */
 function renderLists(){

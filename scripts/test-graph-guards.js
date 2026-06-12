@@ -278,7 +278,7 @@ assert(html.includes('id="restoreHiddenBtn"'), 'restore hidden button should be 
 assert(html.includes('function hideNode(id)'), 'explicit hideNode action should be present');
 assert(html.includes('function restoreHiddenNodes()'), 'restoreHiddenNodes action should be present');
 assert(html.includes('data-hide-id='), 'detail hide button should carry the displayed node id');
-assert(html.includes("querySelector('[data-hide-id]')"), 'detail hide button should be wired after rendering');
+assert(html.includes("ev.target.closest('[data-hide-id]')"), 'detail hide button should be wired via event delegation on #detail');
 assert(!html.includes('onclick="hideNode('), 'detail hide button should not use fragile inline quoted JavaScript');
 assert(html.includes('不会修改工程文件'), 'hide confirmation should clarify files are not modified');
 
