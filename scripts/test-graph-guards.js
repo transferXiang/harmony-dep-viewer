@@ -280,7 +280,7 @@ assert(html.includes('function restoreHiddenNodes()'), 'restoreHiddenNodes actio
 assert(html.includes('data-hide-id='), 'detail hide button should carry the displayed node id');
 assert(html.includes("ev.target.closest('[data-hide-id]')"), 'detail hide button should be wired via event delegation on #detail');
 assert(!html.includes('onclick="hideNode('), 'detail hide button should not use fragile inline quoted JavaScript');
-assert(html.includes('不会修改工程文件'), 'hide confirmation should clarify files are not modified');
+assert(!html.includes('confirm(`将从当前依赖图中隐藏'), 'hide flow should not show a confirmation prompt');
 
 console.log('hidden node UI tests passed');
 }

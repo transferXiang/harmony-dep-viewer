@@ -698,12 +698,6 @@ function hideNode(id){
   // Compute cascade over the currently-visible graph (already excludes prior hiddenIds).
   const visible=visibleGraphData(DATA);
   const cascade=findOrphans(visible.modules, visible.deps, [id]);
-  const previewMax=8;
-  const previewIds=cascade.slice(0,previewMax);
-  const cascadeMsg=cascade.length
-    ? `\n\n由此变成游离的 ${cascade.length} 个节点也会一并隐藏：\n  ${previewIds.join(', ')}${cascade.length>previewMax?` …（共 ${cascade.length} 个）`:''}`
-    : '';
-  if(!confirm(`将从当前依赖图中隐藏 ${id}，并同时隐藏与它相连的依赖线。${cascadeMsg}\n\n不会修改工程文件。`))return;
   const hidden=new Set(DATA.hiddenIds||[]);
   hidden.add(id);
   for(const x of cascade) hidden.add(x);
@@ -711,7 +705,13 @@ function hideNode(id){
   debugHide('hide confirmed', {id, cascade, hiddenIds:DATA.hiddenIds});
   if(DATA.positions){ delete DATA.positions[id]; for(const x of cascade) delete DATA.positions[x]; }
   saveData(DATA);
+  // Preserve focus mode across the hide: capture filterRoot before render
+  // (render() clears it), then re-apply if the focus root is still visible.
+  // If the focus root itself was hidden (either as seed or in cascade),
+  // A.byId[prevFilterRoot] will be undefined and focus is correctly dropped.
+  const prevFilterRoot=filterRoot;
   render(DATA,lastSource);
+  if(prevFilterRoot && A.byId[prevFilterRoot]) selectFilter(prevFilterRoot);
 }
 function restoreHiddenNodes(){
   if(!DATA||!(DATA.hiddenIds||[]).length)return;
