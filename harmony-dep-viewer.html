@@ -76,7 +76,17 @@
   #detail .kv b{font-variant-numeric:tabular-nums;}
   .detailActions{display:flex; justify-content:flex-end; margin:-2px 0 8px;}
   .muted{color:var(--ink2);}
-  .hint{font-size:11.5px; color:var(--ink2); padding:0 14px 10px; line-height:1.6;}
+  /* Help popover — triggered by the ? button in header */
+  .helpBtn{display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--ink2); font-size:13px; font-weight:600; cursor:pointer; user-select:none;}
+  .helpBtn:hover{background:var(--bg); border-color:var(--hsp); color:var(--hsp);}
+  .helpBtn.active{background:var(--hsp); border-color:var(--hsp); color:#fff;}
+  #helpPopover{position:fixed; top:54px; right:14px; width:380px; max-width:calc(100vw - 28px); background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; box-shadow:0 6px 24px rgba(0,0,0,.12); font-size:12.5px; color:var(--ink); line-height:1.7; z-index:50; display:none;}
+  #helpPopover.show{display:block;}
+  #helpPopover h3{font-size:13px; font-weight:600; margin-bottom:6px; color:var(--ink);}
+  #helpPopover h3:not(:first-child){margin-top:10px;}
+  #helpPopover p{color:var(--ink2); margin:0 0 4px;}
+  #helpPopover b{color:var(--ink);}
+  #helpPopover code{background:var(--bg); padding:1px 5px; border-radius:3px; font-size:11px;}
   /* SVG 节点与边 */
   .node{cursor:grab;}
   .node.dragging{cursor:grabbing;}
@@ -117,8 +127,28 @@
     <span><span class="sw" style="background:var(--har-bg);border-color:var(--har)"></span>HAR</span>
     <span><span class="solid"></span>静态依赖</span>
     <span><span class="dash"></span>动态依赖</span>
+    <button class="helpBtn" id="helpBtn" title="操作 & 体积说明" aria-label="帮助">?</button>
   </div>
 </header>
+<div id="helpPopover" role="dialog" aria-label="帮助">
+  <h3>图操作</h3>
+  <p><b>左键点节点</b>：选中查看详情（不筛选）</p>
+  <p><b>右键点节点 / 搜索</b>：筛选，只显示其正反向追溯（0 级 = 不看该方向）</p>
+  <p><b>右键空白</b>：恢复全图；左键空白不影响选择</p>
+  <p>筛选状态下「自动排版」只对当前子图排版</p>
+  <p>拖动节点调位置（自动保存）· 滚轮缩放 / 拖空白平移</p>
+  <h3>体积估算</h3>
+  <p>"估算安装包尺度"按文件类型加权压缩：</p>
+  <p>· 源码 <code>.ets/.ts/.js</code> × <b>0.4</b></p>
+  <p>· 文本资源 <code>.json5/.xml/.svg</code> × <b>0.3</b></p>
+  <p>· 二进制 <code>.png/.jpg/.mp4/.ttf</code> × <b>1.0</b></p>
+  <p>非编译产物实测值，仅供横向比较。</p>
+  <h3>HAR-vs-HSP 建议等级</h3>
+  <p>🔴 <b>强烈建议下沉 HSP</b>：浪费 ≥200KB</p>
+  <p>🟡 <b>建议下沉 HSP</b>：浪费 ≥50KB 或副本数 ≥3</p>
+  <p>🟢 <b>保持 HAR</b>：体积 <50KB 且独占</p>
+  <p>HSP 只有 1 消费者且 <100KB → 可考虑改回 HAR</p>
+</div>
 <main>
   <div id="graphWrap">
     <svg id="svg"></svg>
@@ -163,7 +193,6 @@
         <div id="wasteSum" class="muted" style="font-size:12px; padding:6px 8px;"></div>
       </div>
     </div>
-    <div class="hint">左键点节点：选中查看详情（不筛选）· <b>右键点节点 / 搜索：筛选</b>，只显示其正反向追溯（0 级=不看该方向）· <b>右键空白：恢复全图</b>，左键空白不影响选择<br>筛选状态下「自动排版」只对当前子图排版 · 拖动节点调位置（自动保存）· 滚轮缩放 / 拖空白平移<br>体积为「估算安装包尺度」：源码 ×0.4、文本资源 ×0.3、二进制资源 ×1.0；非编译产物实测值，仅供横向比较</div>
   </aside>
 </main>
 <input type="file" id="dirInput" webkitdirectory multiple style="display:none">
@@ -892,6 +921,26 @@ function showDetail(id,fwd,rev){
     const btn=ev.target.closest('[data-hide-id]');
     if(btn) hideNode(btn.dataset.hideId);
   });
+})();
+
+// Help popover toggle. Click the ? button to open, click anywhere outside
+// (or the button again, or press Escape) to close.
+(function attachHelpPopover(){
+  const btn=document.getElementById('helpBtn');
+  const pop=document.getElementById('helpPopover');
+  if(!btn||!pop)return;
+  const close=()=>{ pop.classList.remove('show'); btn.classList.remove('active'); };
+  btn.addEventListener('click',ev=>{
+    ev.stopPropagation();
+    const showing=pop.classList.toggle('show');
+    btn.classList.toggle('active', showing);
+  });
+  document.addEventListener('click',ev=>{
+    if(!pop.classList.contains('show'))return;
+    if(pop.contains(ev.target)||btn.contains(ev.target))return;
+    close();
+  });
+  document.addEventListener('keydown',ev=>{ if(ev.key==='Escape')close(); });
 })();
 
 /* ================= 侧栏列表 ================= */
