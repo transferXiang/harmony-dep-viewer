@@ -68,6 +68,18 @@
   .recoBox .recoNotes ul{margin:4px 0 0 0; padding-left:18px;}
   .recoBox .recoNotes li{margin-bottom:2px;}
   .dupRow .num{color:var(--warn); font-weight:600;}
+  /* Sink-cluster cards */
+  .sinkCard{margin:6px 8px; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); cursor:pointer;}
+  .sinkCard:hover{border-color:var(--hsp);}
+  .sinkCard.active{border-color:var(--hsp); background:var(--hsp-bg);}
+  .sinkCard .sinkHeader{display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:4px;}
+  .sinkCard .sinkSavings{color:var(--warn); font-weight:600; font-variant-numeric:tabular-nums;}
+  .sinkCard .sinkMembers{display:flex; flex-wrap:wrap; gap:3px; margin-bottom:4px;}
+  .sinkCard .sinkOwners{font-size:11px; color:var(--ink2); display:flex; flex-wrap:wrap; gap:3px; align-items:center;}
+  .sinkCard .miniChip{font-size:10.5px; padding:1px 6px; border-radius:8px; background:var(--har-bg); border:1px solid var(--har); color:var(--ink);}
+  .sinkCard .ownerChip{font-size:10px; padding:0 5px; border-radius:8px; color:#fff;}
+  .sinkCard .ownerChip.hap{background:var(--hap);}
+  .sinkCard .ownerChip.hsp{background:var(--hsp);}
   #detail{font-size:12.5px; line-height:1.7; background:var(--bg); border-radius:8px; padding:10px 12px;}
   #detail .modList{display:flex; flex-wrap:wrap; gap:5px; margin-top:6px;}
   #detail .chip{font-size:11px; padding:2px 7px; border-radius:10px; background:#fff; border:1px solid var(--line); cursor:pointer;}
@@ -107,6 +119,7 @@
   .node.fwd rect{}
   .node.revN rect{stroke:var(--ok);}
   .node.cutNode rect{stroke-dasharray:5 4;}
+  .node.clusterHi rect{stroke-width:3; filter:drop-shadow(0 0 4px rgba(63,126,194,.7));}
   .edge.fwdE{stroke:var(--hap); stroke-width:2.2; opacity:1;}
   .edge.revE{stroke:var(--ok); stroke-width:2; opacity:1;}
   .edge.cutEdge{stroke:var(--warn); stroke-width:2; stroke-dasharray:6 5; opacity:1;}
@@ -191,6 +204,10 @@
         <h2>重复打包的 HAR <small>· 被 ≥2 个包拷贝</small></h2>
         <div id="dupList"></div>
         <div id="wasteSum" class="muted" style="font-size:12px; padding:6px 8px;"></div>
+      </div>
+      <div class="sec" id="sinkClusterSec" style="display:none">
+        <h2>可下沉的 HAR 组 <small>· owner 一致，可整组提成一个 HSP</small></h2>
+        <div id="sinkClusterList"></div>
       </div>
     </div>
   </aside>
@@ -516,6 +533,26 @@ function buildAnalysis(data){
   // Annotate each module with a HAR-vs-HSP design recommendation
   analysis.recommendations={};
   data.modules.forEach(m=>{ const r=recommendModule(m, analysis); if(r) analysis.recommendations[m.id]=r; });
+  // Cluster-sink suggestions: group HARs that share the exact same set of
+  // owner bundles. Extracting any one such group into a single new HSP
+  // dedupes all its members in one move, which is cheaper than sinking
+  // each individually. Only groups with ≥2 members and ≥2 owners qualify.
+  analysis.sinkClusters=(()=>{
+    const groups=new Map();
+    for(const d of dup){
+      if(d.copies<2) continue;
+      const owners=[...d.owners].sort();
+      const key=owners.join('|');
+      if(!groups.has(key)) groups.set(key,{ownerKey:key, owners, members:[], totalWaste:0, totalSize:0});
+      const g=groups.get(key);
+      g.members.push(d.id);
+      g.totalWaste+=d.waste;
+      g.totalSize+=(byId[d.id]?.size||0);
+    }
+    return [...groups.values()]
+      .filter(g=>g.members.length>=2)
+      .sort((a,b)=>b.totalWaste-a.totalWaste);
+  })();
   return analysis;
 }
 
@@ -755,10 +792,19 @@ function traverse(start,adj,maxLv,cut,reverse){
   return {nodes,edges,lvl};
 }
 function clearFocusClasses(){
-  Object.values(nodeEls).forEach(n=>n.classList.remove('hidden','root','fwd','revN','cutNode'));
+  Object.values(nodeEls).forEach(n=>n.classList.remove('hidden','root','fwd','revN','cutNode','clusterHi'));
   Object.values(edgeEls).forEach(e=>e.classList.remove('hidden','fwdE','revE','cutEdge'));
   Object.values(cutMarks).forEach(m=>m.classList.add('hidden'));
   document.querySelectorAll('.row').forEach(r=>r.classList.remove('active'));
+}
+// Visually highlight all members and owners of a sink-cluster on the graph.
+// Uses a dedicated `.clusterHi` class so it doesn't clash with focus mode.
+function highlightCluster(g){
+  if(!A) return;
+  Object.values(nodeEls).forEach(n=>n.classList.remove('clusterHi'));
+  if(!g) return;
+  for(const id of g.members)  nodeEls[id]?.classList.add('clusterHi');
+  for(const id of g.owners)   nodeEls[id]?.classList.add('clusterHi');
 }
 let filterRoot=null; // 右键筛选的根节点（决定可见范围）；selected 仅决定详情
 function clearSel(){
@@ -964,6 +1010,40 @@ function renderLists(){
       <span class="num">×${d.copies}${d.waste?' · ≈'+d.waste+'K':''}</span></div>`;
   }).join(''):'<div class="muted" style="font-size:12px;padding:4px 8px">无重复打包</div>';
   document.getElementById('wasteSum').textContent=A.totalWaste?`重复打包体积合计 ≈${A.totalWaste} KB（估算安装包尺度，若全部去重）`:'';
+  // Sink-cluster suggestions
+  const clusters=A.sinkClusters||[];
+  const sinkSec=document.getElementById('sinkClusterSec');
+  const sinkList=document.getElementById('sinkClusterList');
+  sinkSec.style.display=clusters.length?'':'none';
+  sinkList.innerHTML=clusters.map((g,i)=>{
+    const members=g.members.map(id=>`<span class="miniChip" data-sel="${escapeAttr(id)}">${id}</span>`).join('');
+    const owners=g.owners.map(id=>{
+      const t=A.byId[id]?.type||'har';
+      return `<span class="ownerChip ${t}" data-sel="${escapeAttr(id)}">${id}</span>`;
+    }).join('');
+    return `<div class="sinkCard" data-cluster="${i}">
+      <div class="sinkHeader">
+        <span><b>${g.members.length} 个 HAR</b> · 共 ${g.totalSize}K</span>
+        <span class="sinkSavings">省 ≈${g.totalWaste}K</span>
+      </div>
+      <div class="sinkMembers">${members}</div>
+      <div class="sinkOwners">归属 ${g.owners.length} 个边界：${owners}</div>
+    </div>`;
+  }).join('');
+  // Wire click on member / owner chips to select that node on the graph
+  sinkList.querySelectorAll('[data-sel]').forEach(c=>{
+    c.onclick=ev=>{ev.stopPropagation(); selectOnly(c.dataset.sel,true);};
+  });
+  // Click on the card body (not on a chip) highlights ALL members on the graph
+  sinkList.querySelectorAll('.sinkCard').forEach(card=>{
+    card.onclick=()=>{
+      const idx=+card.dataset.cluster;
+      const g=clusters[idx];
+      if(!g)return;
+      sinkList.querySelectorAll('.sinkCard').forEach(c=>c.classList.toggle('active', c===card));
+      highlightCluster(g);
+    };
+  });
   document.querySelectorAll('.row[data-id]').forEach(r=>{
     r.onclick=()=>selectOnly(r.dataset.id,true);
     r.oncontextmenu=ev=>{ev.preventDefault();selectFilter(r.dataset.id);};
