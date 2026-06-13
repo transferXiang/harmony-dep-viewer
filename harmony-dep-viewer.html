@@ -120,6 +120,17 @@
   .node.revN rect{stroke:var(--ok);}
   .node.cutNode rect{stroke-dasharray:5 4;}
   .node.clusterHi rect{stroke-width:3; filter:drop-shadow(0 0 4px rgba(63,126,194,.7));}
+  .node.simulated rect{stroke:#9b59b6 !important; stroke-width:2.5; stroke-dasharray:5 3; fill:#f4ecf7 !important;}
+  /* Simulation panel */
+  #simulationPanel .simBar{display:flex; align-items:center; gap:6px; font-size:12.5px; margin:3px 0;}
+  #simulationPanel .simBar .label{width:64px; color:var(--ink2);}
+  #simulationPanel .simBar .val{font-variant-numeric:tabular-nums; font-weight:600; min-width:80px; text-align:right;}
+  #simulationPanel .simBar.before .val{color:var(--warn);}
+  #simulationPanel .simBar.after .val{color:var(--ok);}
+  #simulationPanel .simDelta{margin:4px 8px; padding:6px 10px; border-radius:6px; background:#e6f3e9; color:var(--ok); font-weight:600; font-size:12.5px;}
+  #simulationPanel .simList{display:flex; flex-wrap:wrap; gap:4px; padding:6px 8px;}
+  #simulationPanel .simChip{font-size:11px; padding:2px 8px; border-radius:10px; background:#f4ecf7; color:#7d3c98; border:1px solid #c39bd3; cursor:pointer;}
+  #simulationPanel .simChip:hover{background:#e8daef;}
   .edge.fwdE{stroke:var(--hap); stroke-width:2.2; opacity:1;}
   .edge.revE{stroke:var(--ok); stroke-width:2; opacity:1;}
   .edge.cutEdge{stroke:var(--warn); stroke-width:2; stroke-dasharray:6 5; opacity:1;}
@@ -208,6 +219,12 @@
       <div class="sec" id="sinkClusterSec" style="display:none">
         <h2>可下沉的 HAR 组 <small>· owner 一致，可整组提成一个 HSP</small></h2>
         <div id="sinkClusterList"></div>
+      </div>
+      <div class="sec" id="simulationSec" style="display:none">
+        <h2>🧪 模拟下沉结果 <small>· before / after</small>
+          <button class="btn" style="float:right;font-size:11px;padding:2px 8px" onclick="clearSimulation()">清除模拟</button>
+        </h2>
+        <div id="simulationPanel"></div>
       </div>
     </div>
   </aside>
@@ -497,7 +514,10 @@ async function finishScan(entries,name){
 }
 
 /* ================= 打包分析（HAR 追溯 / HSP 截断） ================= */
-function buildAnalysis(data){
+// options.simulatedHsp: Set<id> — HARs to treat as HSP boundaries (sink simulator)
+function buildAnalysis(data, options){
+  const opts=options||{};
+  const simulated=opts.simulatedHsp instanceof Set ? opts.simulatedHsp : new Set();
   const byId=Object.fromEntries(data.modules.map(m=>[m.id,m]));
   const out={},inn={},staticOut={},dynamicOut={};
   data.modules.forEach(m=>{out[m.id]=[];inn[m.id]=[];staticOut[m.id]=[];dynamicOut[m.id]=[];});
@@ -508,6 +528,10 @@ function buildAnalysis(data){
       (edgeType(edge)==='dynamic'?dynamicOut:staticOut)[a].push(b);
     }
   });
+  // In simulation mode, a HAR in `simulated` acts as if it were an HSP:
+  // it becomes a boundary for its parents (not bundled), but its own bundle
+  // (its transitive HAR deps that aren't themselves simulated) still counts.
+  const isBoundary=id=>byId[id]?.type!=='har' || simulated.has(id);
   function analyze(rootId){
     const bundled=new Set(),boundaries=new Set();
     const visited=new Set([rootId]),stack=[rootId];
@@ -515,7 +539,7 @@ function buildAnalysis(data){
       const cur=stack.pop();
       for(const dep of dynamicOut[cur]) boundaries.add(dep);
       for(const dep of staticOut[cur]){
-        if(byId[dep].type==='har'){
+        if(byId[dep].type==='har' && !simulated.has(dep)){
           bundled.add(dep);
           if(!visited.has(dep)){visited.add(dep);stack.push(dep);}
         }else boundaries.add(dep);
@@ -524,12 +548,14 @@ function buildAnalysis(data){
     const kb=[...bundled].reduce((s,id)=>s+byId[id].size,0);
     return {root:rootId,bundled,boundaries,kb};
   }
-  const bundles=data.modules.filter(m=>m.type!=='har').map(m=>analyze(m.id));
-  const dup=data.modules.filter(m=>m.type==='har').map(m=>{
+  // Analyze every HSP/HAP root, plus any simulated HAR (acts as an HSP root).
+  const bundles=data.modules.filter(m=>m.type!=='har' || simulated.has(m.id)).map(m=>analyze(m.id));
+  // dup is computed only over HARs that are still real HARs.
+  const dup=data.modules.filter(m=>m.type==='har' && !simulated.has(m.id)).map(m=>{
     const owners=bundles.filter(b=>b.bundled.has(m.id)).map(b=>b.root);
     return {id:m.id,owners,copies:owners.length,waste:Math.max(0,owners.length-1)*m.size};
   }).sort((a,b)=>b.copies-a.copies||b.waste-a.waste);
-  const analysis={byId,out,inn,bundles,dup,totalWaste:dup.reduce((s,d)=>s+d.waste,0)};
+  const analysis={byId,out,inn,bundles,dup,totalWaste:dup.reduce((s,d)=>s+d.waste,0),simulated:[...simulated]};
   // Annotate each module with a HAR-vs-HSP design recommendation
   analysis.recommendations={};
   data.modules.forEach(m=>{ const r=recommendModule(m, analysis); if(r) analysis.recommendations[m.id]=r; });
@@ -656,7 +682,14 @@ function updateEdgesFor(id){
 
 function render(data,source){
   DATA=sanitizeGraphData(data); const view=visibleGraphData(DATA);
-  A=buildAnalysis(view); lastSource=source;
+  // Compute the BASELINE analysis (no simulation) — used to display
+  // before/after when a sink simulation is active. The "live" A is the
+  // simulated one when simulatedHsp is non-empty, otherwise both are equal.
+  const sim=new Set(Array.isArray(DATA.simulatedHsp)?DATA.simulatedHsp:[]);
+  const baseline=buildAnalysis(view);
+  A=sim.size?buildAnalysis(view,{simulatedHsp:sim}):baseline;
+  A.baseline=baseline;
+  lastSource=source;
   document.getElementById('empty').style.display='none';
   const hiddenCount=(DATA.hiddenIds||[]).length;
   debugHide('render', {source, hiddenIds:DATA.hiddenIds||[], visibleModules:view.modules.length, visibleDeps:view.deps.length});
@@ -887,6 +920,32 @@ function restoreHiddenNodes(){
   saveData(DATA);
   render(DATA,lastSource);
 }
+// ---- Sink simulator ----
+function toggleSimulate(id){
+  if(!DATA||!A?.byId[id]||A.byId[id].type!=='har')return;
+  const sim=new Set(DATA.simulatedHsp||[]);
+  if(sim.has(id))sim.delete(id); else sim.add(id);
+  DATA.simulatedHsp=[...sim];
+  const prevSel=selected, prevFilter=filterRoot;
+  saveData(DATA);
+  render(DATA,lastSource);
+  if(prevFilter && A.byId[prevFilter]) selectFilter(prevFilter);
+  else if(prevSel && A.byId[prevSel]) selectOnly(prevSel);
+}
+function simulateCluster(memberIds){
+  if(!DATA||!Array.isArray(memberIds)||!memberIds.length)return;
+  const sim=new Set(DATA.simulatedHsp||[]);
+  memberIds.forEach(id=>{ if(A?.byId[id]?.type==='har') sim.add(id); });
+  DATA.simulatedHsp=[...sim];
+  saveData(DATA);
+  render(DATA,lastSource);
+}
+function clearSimulation(){
+  if(!DATA||!(DATA.simulatedHsp||[]).length)return;
+  delete DATA.simulatedHsp;
+  saveData(DATA);
+  render(DATA,lastSource);
+}
 ['fLv','rLv','cutChk'].forEach(i=>document.getElementById(i).addEventListener('change',()=>{
   if(filterRoot)applyFocus(); else if(selected)selectOnly(selected);
 }));
@@ -919,7 +978,11 @@ function showDetail(id,fwd,rev){
   document.getElementById('detailSec').style.display='';
   document.getElementById('detailTitle').innerHTML=`选中：${m.id} <span class="tag ${m.type}">${m.type.toUpperCase()}${m.ext?'·三方':''}</span>`;
   const viewInfo=`<div class="kv"><span>当前视图（按所选层级）</span><b><span style="color:var(--hap)">正向 ${fwd.nodes.size}</span> / <span style="color:var(--ok)">反向 ${rev.nodes.size}</span></b></div>`;
-  let html=`<div class="detailActions"><button class="btn" data-hide-id="${escapeAttr(id)}">隐藏当前节点</button></div>`;
+  const simSet=new Set(DATA?.simulatedHsp||[]);
+  const isSim=simSet.has(id);
+  const simBtn=m.type==='har'&&!m.ext
+    ? `<button class="btn" data-sim-id="${escapeAttr(id)}" style="${isSim?'background:#9b59b6;color:#fff;border-color:#9b59b6;':''}" title="把这个 HAR 当成 HSP 试算一遍">${isSim?'❌ 取消模拟':'🧪 假设改 HSP'}</button>`:'';
+  let html=`<div class="detailActions">${simBtn}<button class="btn" data-hide-id="${escapeAttr(id)}">隐藏当前节点</button></div>`;
   if(m.type!=='har'){
     const b=A.bundles.find(b=>b.root===id);
     const chips=[...b.bundled].sort((a,c)=>A.byId[c].size-A.byId[a].size)
@@ -964,8 +1027,10 @@ function showDetail(id,fwd,rev){
   if(!detail)return;
   detail.addEventListener('click',ev=>{
     debugHide('detail click', {target:ev.target.tagName, hasHideAttr:!!ev.target.closest('[data-hide-id]')});
-    const btn=ev.target.closest('[data-hide-id]');
-    if(btn) hideNode(btn.dataset.hideId);
+    const hideBtn=ev.target.closest('[data-hide-id]');
+    if(hideBtn){ hideNode(hideBtn.dataset.hideId); return; }
+    const simBtn=ev.target.closest('[data-sim-id]');
+    if(simBtn){ toggleSimulate(simBtn.dataset.simId); return; }
   });
 })();
 
@@ -1009,7 +1074,8 @@ function renderLists(){
       ${chip}
       <span class="num">×${d.copies}${d.waste?' · ≈'+d.waste+'K':''}</span></div>`;
   }).join(''):'<div class="muted" style="font-size:12px;padding:4px 8px">无重复打包</div>';
-  document.getElementById('wasteSum').textContent=A.totalWaste?`重复打包体积合计 ≈${A.totalWaste} KB（估算安装包尺度，若全部去重）`:'';
+  const simLabel=(DATA?.simulatedHsp||[]).length?`（🧪 模拟下沉中：${A.totalWaste} KB，原始 ${A.baseline?.totalWaste||A.totalWaste} KB）`:'';
+  document.getElementById('wasteSum').textContent=A.totalWaste||A.baseline?.totalWaste?`重复打包体积合计 ≈${A.totalWaste} KB（估算安装包尺度，若全部去重）${simLabel}`:'';
   // Sink-cluster suggestions
   const clusters=A.sinkClusters||[];
   const sinkSec=document.getElementById('sinkClusterSec');
@@ -1028,13 +1094,24 @@ function renderLists(){
       </div>
       <div class="sinkMembers">${members}</div>
       <div class="sinkOwners">归属 ${g.owners.length} 个边界：${owners}</div>
+      <div style="margin-top:6px;text-align:right">
+        <button class="btn" data-sim-cluster="${i}" style="font-size:11px;padding:2px 8px">🧪 模拟下沉本组</button>
+      </div>
     </div>`;
   }).join('');
   // Wire click on member / owner chips to select that node on the graph
   sinkList.querySelectorAll('[data-sel]').forEach(c=>{
     c.onclick=ev=>{ev.stopPropagation(); selectOnly(c.dataset.sel,true);};
   });
-  // Click on the card body (not on a chip) highlights ALL members on the graph
+  // 'Simulate sink for whole cluster' button
+  sinkList.querySelectorAll('[data-sim-cluster]').forEach(btn=>{
+    btn.onclick=ev=>{
+      ev.stopPropagation();
+      const g=clusters[+btn.dataset.simCluster];
+      if(g) simulateCluster(g.members);
+    };
+  });
+  // Click on the card body (not on a chip / button) highlights all members
   sinkList.querySelectorAll('.sinkCard').forEach(card=>{
     card.onclick=()=>{
       const idx=+card.dataset.cluster;
@@ -1044,6 +1121,35 @@ function renderLists(){
       highlightCluster(g);
     };
   });
+  // ---- Simulation panel ----
+  const simSec=document.getElementById('simulationSec');
+  const simPanel=document.getElementById('simulationPanel');
+  const simIds=(DATA?.simulatedHsp||[]).filter(id=>A.byId[id]);
+  if(simIds.length && A.baseline){
+    const before=A.baseline.totalWaste;
+    const after=A.totalWaste;
+    const delta=before-after;
+    const pct=before?Math.round(delta*100/before):0;
+    const chips=simIds.map(id=>`<span class="simChip" data-sel="${escapeAttr(id)}">${id}</span>`).join('');
+    simPanel.innerHTML=`
+      <div class="simBar before"><span class="label">改造前</span><span class="val">${before} KB</span><span class="muted">重复打包总浪费</span></div>
+      <div class="simBar after"><span class="label">改造后</span><span class="val">${after} KB</span><span class="muted">假设这些 HAR 改成 HSP</span></div>
+      <div class="simDelta">↓ 节省 ${delta} KB（${pct}%）</div>
+      <div class="muted" style="padding:0 8px;font-size:11.5px">已模拟改 HSP 的 HAR：</div>
+      <div class="simList">${chips}</div>`;
+    simSec.style.display='';
+    simPanel.querySelectorAll('[data-sel]').forEach(c=>{
+      c.onclick=()=>selectOnly(c.dataset.sel,true);
+    });
+  }else{
+    simSec.style.display='none';
+    simPanel.innerHTML='';
+  }
+  // Visually mark simulated nodes on the graph
+  const simSet=new Set(simIds);
+  for(const [nid,el] of Object.entries(nodeEls)){
+    el.classList.toggle('simulated', simSet.has(nid));
+  }
   document.querySelectorAll('.row[data-id]').forEach(r=>{
     r.onclick=()=>selectOnly(r.dataset.id,true);
     r.oncontextmenu=ev=>{ev.preventDefault();selectFilter(r.dataset.id);};
