@@ -121,6 +121,12 @@
   .node.cutNode rect{stroke-dasharray:5 4;}
   .node.clusterHi rect{stroke-width:3; filter:drop-shadow(0 0 4px rgba(63,126,194,.7));}
   .node.simulated rect{stroke:#9b59b6 !important; stroke-width:2.5; stroke-dasharray:5 3; fill:#f4ecf7 !important;}
+  /* Cluster super-node — visually distinct from HAR/HSP/HAP */
+  .node.cluster rect{fill:#fef9e7; stroke:#b7950b; stroke-width:2.4; stroke-dasharray:1 0;}
+  .node.cluster text.label{fill:#7d6608; font-weight:700;}
+  .node.cluster text.sub{fill:#b7950b;}
+  .foldBtn{font-size:11.5px; padding:3px 9px;}
+  .foldBtn.active{background:#fef9e7; border-color:#b7950b; color:#7d6608; font-weight:600;}
   /* Simulation panel */
   #simulationPanel .simBar{display:flex; align-items:center; gap:6px; font-size:12.5px; margin:3px 0;}
   #simulationPanel .simBar .label{width:64px; color:var(--ink2);}
@@ -190,6 +196,8 @@
       <span class="sep"></span>
       <input id="searchBox" list="nodeNames" placeholder="搜索模块名…" style="font-size:12.5px;padding:3px 8px;border:1px solid var(--line);border-radius:5px;width:150px">
       <datalist id="nodeNames"></datalist>
+      <span class="sep"></span>
+      <span id="foldBar" style="display:flex;gap:4px;"></span>
     </div>
     <div id="tip"></div>
     <div id="empty">
@@ -306,6 +314,65 @@ function visibleGraphData(data){
   const deps=clean.deps.filter(([a,b])=>ids.has(a)&&ids.has(b));
   return {...clean, modules, deps};
 }
+// Cluster fold helpers. Cluster name = first path segment of m._src.
+// e.g. "commons/har_utils" → "commons", "shared/hsp_account" → "shared".
+// Modules with no nested srcPath (e.g. "entry") return null — they're
+// their own cluster and can never be folded into something else.
+function clusterOf(m){
+  if(!m||!m._src) return null;
+  const seg=String(m._src).split('/');
+  return seg.length>=2 ? seg[0] : null;
+}
+function availableClusters(modules){
+  const counts={};
+  for(const m of modules){
+    const c=clusterOf(m);
+    if(c) counts[c]=(counts[c]||0)+1;
+  }
+  return counts;
+}
+/**
+ * Apply cluster folding to a view (modules+deps). Members of any cluster
+ * in `foldedClusters` collapse into a single synthetic node. Edges crossing
+ * the cluster boundary are kept; edges fully inside are dropped.
+ * Returns the transformed view plus a clusterMap describing each super-node.
+ */
+function foldClusters(view, foldedClusters){
+  const folded=new Set(Array.isArray(foldedClusters)?foldedClusters:[]);
+  if(!folded.size) return {...view, clusterMap:{}};
+  const memberToCluster={};
+  const clusterMap={};
+  for(const m of view.modules){
+    const c=clusterOf(m);
+    if(c && folded.has(c)){
+      memberToCluster[m.id]=c;
+      (clusterMap[c]||=(clusterMap[c]={id:'cluster:'+c, type:'cluster', sub:'聚合', size:0, members:[], desc:`${c}/* 聚合（${0} 个模块）`})).members.push(m.id);
+      clusterMap[c].size+=m.size||0;
+    }
+  }
+  for(const c of Object.keys(clusterMap)){
+    clusterMap[c].desc=`${c}/* 聚合（${clusterMap[c].members.length} 个模块）`;
+  }
+  const idOf=mid=>memberToCluster[mid] ? clusterMap[memberToCluster[mid]].id : mid;
+  // Keep non-clustered modules as-is, plus one synthetic per folded cluster.
+  const modules=view.modules.filter(m=>!memberToCluster[m.id])
+    .concat(Object.values(clusterMap).map(c=>({id:c.id, type:'cluster', sub:c.sub, size:c.size, desc:c.desc, _cluster:c.members})));
+  // Rewrite + dedupe edges. Track dynamic-ness per edge: if any constituent
+  // edge was dynamic, the aggregate edge is dynamic. Internal edges drop.
+  const edgeMap=new Map();
+  for(const e of view.deps){
+    if(!Array.isArray(e)||e.length<2) continue;
+    const a=idOf(e[0]), b=idOf(e[1]);
+    if(a===b) continue;
+    const k=a+'>'+b;
+    const isDyn=e[2]==='dynamic';
+    const prev=edgeMap.get(k);
+    if(prev){ if(!isDyn) prev[2]=undefined; } // any static edge degrades aggregate to static
+    else edgeMap.set(k, isDyn?[a,b,'dynamic']:[a,b]);
+  }
+  const deps=[...edgeMap.values()].map(e=>e[2]==='dynamic'?[e[0],e[1],'dynamic']:[e[0],e[1]]);
+  return {...view, modules, deps, clusterMap};
+}
 /**
  * Compute the orphan-cascade triggered by hiding `seedIds`.
  *
@@ -393,7 +460,8 @@ async function scanCore(entries, projectName){
   for(const m of modules){
     addDeps(m,m._deps,'static');
     addDeps(m,m._dynDeps,'dynamic');
-    delete m._deps; delete m._dynDeps; delete m._src;
+    delete m._deps; delete m._dynDeps;
+    // _src is kept (needed by cluster-fold UI to derive group name)
   }
   modules.push(...externals.values());
   const out={}; modules.forEach(x=>out[x.id]=[]); deps.forEach(([a,b])=>out[a].push(b));
@@ -689,13 +757,21 @@ function render(data,source){
   const baseline=buildAnalysis(view);
   A=sim.size?buildAnalysis(view,{simulatedHsp:sim}):baseline;
   A.baseline=baseline;
+  // Apply cluster folding for layout/render only. Analysis (A) stays
+  // on the unfolded view so per-module dup/recommendations remain accurate.
+  const renderView=foldClusters(view, DATA.foldedClusters||[]);
+  A.clusterMap=renderView.clusterMap||{};
+  // Make cluster super-nodes addressable by selection handlers
+  for(const m of renderView.modules){ if(m.type==='cluster') A.byId[m.id]=m; }
+  updateClusterFoldUI(view.modules);
   lastSource=source;
   document.getElementById('empty').style.display='none';
   const hiddenCount=(DATA.hiddenIds||[]).length;
-  debugHide('render', {source, hiddenIds:DATA.hiddenIds||[], visibleModules:view.modules.length, visibleDeps:view.deps.length});
-  setStatus(`${DATA.projectName} · ${view.modules.length} 模块 / ${view.deps.length} 依赖 · ${source} ${new Date(DATA.scannedAt).toLocaleString()}${hiddenCount?' · 已隐藏 '+hiddenCount+' 模块':''}`);
+  const foldedCount=(DATA.foldedClusters||[]).length;
+  debugHide('render', {source, hiddenIds:DATA.hiddenIds||[], visibleModules:view.modules.length, visibleDeps:view.deps.length, folded:DATA.foldedClusters||[]});
+  setStatus(`${DATA.projectName} · ${view.modules.length} 模块 / ${view.deps.length} 依赖 · ${source} ${new Date(DATA.scannedAt).toLocaleString()}${hiddenCount?' · 已隐藏 '+hiddenCount+' 模块':''}${foldedCount?' · 已折叠 '+foldedCount+' 组':''}`);
   updateHiddenControls();
-  XY=computeLayout(view);
+  XY=computeLayout(renderView);
   if(DATA.positions) for(const [id,p] of Object.entries(DATA.positions)) if(XY[id])XY[id]={...p};
   svg.innerHTML=''; selected=null; filterRoot=null;
   fitViewBox();
@@ -708,7 +784,7 @@ function render(data,source){
   const el=(t,attrs,parent)=>{const e=document.createElementNS(NS,t);for(const k in attrs)e.setAttribute(k,attrs[k]);(parent||g).appendChild(e);return e;};
   const {byId}=A;
 
-  view.deps.forEach((edge)=>{
+  renderView.deps.forEach((edge)=>{
     const [a,b]=edge;
     if(!XY[a]||!XY[b])return;
     const {d,mx,my}=edgePathD(a,b);
@@ -719,13 +795,17 @@ function render(data,source){
     edgeEls[edgeKey(a,b)]=p;
     edgeList.push({a,b,el:p,mk});
   });
-  view.modules.forEach(m=>{
+  renderView.modules.forEach(m=>{
     const {x,y}=XY[m.id];
     const n=el('g',{class:'node '+m.type+(m.ext?' ext':''),transform:`translate(${x},${y})`,'data-id':m.id});
     el('rect',{width:NW,height:NH,rx:9},n);
     const label=el('text',{x:10,y:19,class:'label'},n);
     label.textContent=m.id.length>16?m.id.slice(0,15)+'…':m.id;
-    el('text',{x:10,y:35,class:'sub'},n).textContent=`${m.type.toUpperCase()}·${m.sub}${m.size?' · 体积≈'+m.size+'K':''}`;
+    if(m.type==='cluster'){
+      el('text',{x:10,y:35,class:'sub'},n).textContent=`📦 ${m._cluster.length} 个模块 · 共 ${m.size}K`;
+    }else{
+      el('text',{x:10,y:35,class:'sub'},n).textContent=`${m.type.toUpperCase()}·${m.sub}${m.size?' · 体积≈'+m.size+'K':''}`;
+    }
     if(m.type==='har'){
       const d=A.dup.find(d=>d.id===m.id);
       if(d&&d.copies>=2){
@@ -806,7 +886,11 @@ window.addEventListener('mouseup',ev=>{
   nodeDrag=null;
   if(moved){
     if(DATA){(DATA.positions??={})[id]={...XY[id]}; saveData(DATA); fitViewBox();}
-  }else if(ev.button===0)selectOnly(id); // 左键未移动 = 选中查看（右键由 contextmenu 处理筛选）
+  }else if(ev.button===0){
+    // Clicking a cluster super-node unfolds it; everything else opens detail.
+    if(id.startsWith('cluster:')) unfoldCluster(id.slice('cluster:'.length));
+    else selectOnly(id);
+  }
 });
 
 /* ================= 双向分级追溯（聚焦模式） ================= */
@@ -945,6 +1029,35 @@ function clearSimulation(){
   delete DATA.simulatedHsp;
   saveData(DATA);
   render(DATA,lastSource);
+}
+// ---- Cluster fold ----
+function toggleFold(name){
+  if(!DATA||!name)return;
+  const folded=new Set(DATA.foldedClusters||[]);
+  if(folded.has(name)) folded.delete(name); else folded.add(name);
+  DATA.foldedClusters=[...folded];
+  saveData(DATA);
+  render(DATA,lastSource);
+}
+function unfoldCluster(name){
+  if(!DATA||!name)return;
+  const folded=new Set(DATA.foldedClusters||[]);
+  folded.delete(name);
+  DATA.foldedClusters=[...folded];
+  saveData(DATA);
+  render(DATA,lastSource);
+}
+function updateClusterFoldUI(modulesUnfolded){
+  const bar=document.getElementById('foldBar');
+  if(!bar)return;
+  const counts=availableClusters(modulesUnfolded);
+  const folded=new Set(DATA?.foldedClusters||[]);
+  const items=Object.keys(counts).filter(c=>counts[c]>=2);
+  bar.innerHTML=items.length?items.map(c=>{
+    const active=folded.has(c);
+    return `<button class="btn foldBtn${active?' active':''}" onclick="toggleFold('${escapeAttr(c)}')" title="${active?'展开':'折叠'} ${c}（${counts[c]} 个模块）">📦 ${c}${active?' ✓':''}</button>`;
+  }).join(''):'';
+  bar.style.display=items.length?'':'none';
 }
 ['fLv','rLv','cutChk'].forEach(i=>document.getElementById(i).addEventListener('change',()=>{
   if(filterRoot)applyFocus(); else if(selected)selectOnly(selected);
@@ -1160,7 +1273,12 @@ function renderLists(){
 const tip=document.getElementById('tip');
 function showTip(ev,m){
   const wrap=document.getElementById('graphWrap').getBoundingClientRect();
-  tip.innerHTML=`<b>${m.id}</b>（${m.type.toUpperCase()} · ${m.sub}）<br>${m.desc||''}${m.size?' · 体积≈'+m.size+'KB':''}<br>依赖 ${A.out[m.id].length} 个 · 被 ${A.inn[m.id].length} 个依赖`;
+  if(m.type==='cluster'){
+    const memberPreview=(m._cluster||[]).slice(0,6).join(', ')+((m._cluster||[]).length>6?` …（${m._cluster.length} 个）`:'');
+    tip.innerHTML=`<b>📦 ${m.id}</b>（聚合）<br>${m.desc||''}<br>${memberPreview}<br><span style="color:#aaa">点击展开</span>`;
+  }else{
+    tip.innerHTML=`<b>${m.id}</b>（${m.type.toUpperCase()} · ${m.sub}）<br>${m.desc||''}${m.size?' · 体积≈'+m.size+'KB':''}<br>依赖 ${(A.out[m.id]||[]).length} 个 · 被 ${(A.inn[m.id]||[]).length} 个依赖`;
+  }
   tip.style.left=Math.min(ev.clientX-wrap.left+14,wrap.width-290)+'px';
   tip.style.top=(ev.clientY-wrap.top+14)+'px';tip.style.opacity=1;
 }
