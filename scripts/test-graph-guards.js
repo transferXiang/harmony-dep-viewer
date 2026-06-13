@@ -167,6 +167,70 @@ assert.deepStrictEqual(cascade5, ['har_utils']);
 
 console.log('findOrphans cascade tests passed');
 
+// ---- compression ratio tests ----
+assert.strictEqual(typeof context.compressionRatio, 'function', 'compressionRatio should be available');
+assert.strictEqual(context.compressionRatio('entry/src/main/ets/Index.ets'), 0.4, 'ets is code');
+assert.strictEqual(context.compressionRatio('entry/oh-package.json5'), 0.3, 'json5 is text');
+assert.strictEqual(context.compressionRatio('entry/resources/icon.png'), 1.0, 'png is binary');
+assert.strictEqual(context.compressionRatio('entry/font.ttf'), 1.0, 'ttf is binary');
+assert.strictEqual(context.compressionRatio('entry/build/output.bin'), 0.4, 'unknown ext defaults to code ratio');
+assert.strictEqual(context.compressionRatio(''), 0.4, 'empty path defaults');
+
+assert.strictEqual(typeof context.estimatedModuleSizeKB, 'function', 'estimatedModuleSizeKB should be available');
+const sizeEntries=[
+  {path:'entry/src/main/ets/Index.ets', size:10240},   // 10KB code  -> 4KB
+  {path:'entry/resources/icon.png', size:5120},        // 5KB binary -> 5KB
+  {path:'entry/oh-package.json5', size:1024},          // 1KB text   -> 0.3KB
+  {path:'other/src/main/ets/Foo.ets', size:99999},     // outside, ignored
+];
+const sz=context.estimatedModuleSizeKB(sizeEntries, 'entry');
+// 4 + 5 + 0.3 = 9.3KB -> rounded 9
+assert.strictEqual(sz, 9, `expected 9KB, got ${sz}`);
+
+console.log('compression ratio tests passed');
+
+// ---- recommendModule tests ----
+assert.strictEqual(typeof context.recommendModule, 'function', 'recommendModule should be available');
+const reco=(m, analysis)=>JSON.parse(JSON.stringify(context.recommendModule(m, analysis)));
+
+// HAR with critical waste (≥200KB) → strongly recommend HSP
+const recoCritical=reco({id:'X', type:'har', size:200}, {dup:[{id:'X', copies:3, waste:400, owners:['e','f','g']}], inn:{X:['a','b']}});
+assert.strictEqual(recoCritical.level, 'critical');
+assert.strictEqual(recoCritical.action, '下沉到 HSP');
+assert.strictEqual(recoCritical.savings, 400);
+
+// HAR with medium waste (50–200KB) → recommend HSP (warning)
+const recoWarn=reco({id:'X', type:'har', size:60}, {dup:[{id:'X', copies:2, waste:60, owners:['e','f']}], inn:{X:['a']}});
+assert.strictEqual(recoWarn.level, 'warning');
+
+// HAR with many copies (≥3) even if waste small → warning
+const recoMany=reco({id:'X', type:'har', size:10}, {dup:[{id:'X', copies:3, waste:20, owners:['e','f','g']}], inn:{X:['a']}});
+assert.strictEqual(recoMany.level, 'warning');
+
+// Small HAR, single owner → ok (best case)
+const recoOk=reco({id:'X', type:'har', size:30}, {dup:[{id:'X', copies:1, waste:0, owners:['e']}], inn:{X:['a']}});
+assert.strictEqual(recoOk.level, 'ok');
+
+// Large HAR, single owner → default keep HAR
+const recoDefault=reco({id:'X', type:'har', size:300}, {dup:[{id:'X', copies:1, waste:0, owners:['e']}], inn:{X:['a']}});
+assert.strictEqual(recoDefault.level, 'default');
+
+// HSP with few consumers + small → suggest revert to HAR
+const recoHspRevert=reco({id:'Y', type:'hsp', size:50}, {dup:[], inn:{Y:['a']}});
+assert.strictEqual(recoHspRevert.level, 'warning');
+assert.strictEqual(recoHspRevert.action, '改回 HAR');
+
+// HSP with several consumers → keep
+const recoHspKeep=reco({id:'Y', type:'hsp', size:50}, {dup:[], inn:{Y:['a','b','c']}});
+assert.strictEqual(recoHspKeep.level, 'ok');
+
+// HAP gets no recommendation (entry point)
+assert.strictEqual(context.recommendModule({id:'Z', type:'hap', size:100}, {dup:[], inn:{Z:[]}}), null);
+// External libs get no recommendation
+assert.strictEqual(context.recommendModule({id:'@x/y', type:'har', size:50, ext:true}, {dup:[], inn:{}}), null);
+
+console.log('recommendModule tests passed');
+
 const scan = await context.scanCore([
   entry('build-profile.json5', json5({
     modules: [

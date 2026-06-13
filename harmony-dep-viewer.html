@@ -52,6 +52,21 @@
   .row .num{font-variant-numeric:tabular-nums; color:var(--ink2); text-align:right; white-space:nowrap;}
   .tag{font-size:10px; padding:1px 5px; border-radius:4px; color:#fff; flex-shrink:0;}
   .tag.hap{background:var(--hap);} .tag.hsp{background:var(--hsp);} .tag.har{background:var(--har);}
+  /* HAR-vs-HSP design recommendation chips */
+  .recoChip{display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; font-weight:600; white-space:nowrap;}
+  .recoChip.critical{background:#fce4e4; color:var(--warn); border:1px solid var(--warn);}
+  .recoChip.warning{background:#fff4dc; color:#a06a00; border:1px solid #d9a44a;}
+  .recoChip.ok{background:#e6f3e9; color:var(--ok); border:1px solid var(--ok);}
+  .recoChip.default{background:#f0f1f3; color:var(--ink2); border:1px solid var(--line);}
+  .recoBox{margin-top:10px; padding:10px 12px; border-radius:6px; background:var(--bg); font-size:12.5px; line-height:1.7;}
+  .recoBox.critical{background:#fef2f2; border-left:3px solid var(--warn);}
+  .recoBox.warning{background:#fefbf0; border-left:3px solid #d9a44a;}
+  .recoBox.ok{background:#f1f8f3; border-left:3px solid var(--ok);}
+  .recoBox.default{background:var(--bg); border-left:3px solid var(--line);}
+  .recoBox .recoTitle{font-weight:600; display:flex; align-items:center; gap:6px; margin-bottom:4px;}
+  .recoBox .recoNotes{margin-top:6px; color:var(--ink2); font-size:11.5px;}
+  .recoBox .recoNotes ul{margin:4px 0 0 0; padding-left:18px;}
+  .recoBox .recoNotes li{margin-bottom:2px;}
   .dupRow .num{color:var(--warn); font-weight:600;}
   #detail{font-size:12.5px; line-height:1.7; background:var(--bg); border-radius:8px; padding:10px 12px;}
   #detail .modList{display:flex; flex-wrap:wrap; gap:5px; margin-top:6px;}
@@ -139,7 +154,7 @@
         <div id="detail"></div>
       </div>
       <div class="sec">
-        <h2>静态打包规模排名 <small>· 打入的 HAR 个数 / 源码量估算</small></h2>
+        <h2>静态打包规模排名 <small>· 打入的 HAR 个数 / 估算安装包体积</small></h2>
         <div id="rankList"></div>
       </div>
       <div class="sec">
@@ -148,7 +163,7 @@
         <div id="wasteSum" class="muted" style="font-size:12px; padding:6px 8px;"></div>
       </div>
     </div>
-    <div class="hint">左键点节点：选中查看详情（不筛选）· <b>右键点节点 / 搜索：筛选</b>，只显示其正反向追溯（0 级=不看该方向）· <b>右键空白：恢复全图</b>，左键空白不影响选择<br>筛选状态下「自动排版」只对当前子图排版 · 拖动节点调位置（自动保存）· 滚轮缩放 / 拖空白平移<br>体积为源码目录大小估算，非构建产物真实体积</div>
+    <div class="hint">左键点节点：选中查看详情（不筛选）· <b>右键点节点 / 搜索：筛选</b>，只显示其正反向追溯（0 级=不看该方向）· <b>右键空白：恢复全图</b>，左键空白不影响选择<br>筛选状态下「自动排版」只对当前子图排版 · 拖动节点调位置（自动保存）· 滚轮缩放 / 拖空白平移<br>体积为「估算安装包尺度」：源码 ×0.4、文本资源 ×0.3、二进制资源 ×1.0；非编译产物实测值，仅供横向比较</div>
   </aside>
 </main>
 <input type="file" id="dirInput" webkitdirectory multiple style="display:none">
@@ -160,6 +175,28 @@
    entries: [{path, size, text: async()=>string}]，path 相对工程根
 ============================================================ */
 const SKIP_DIRS = new Set(['oh_modules','node_modules','build','.git','.hvigor','.idea','.preview','.cxx','libs_gen']);
+
+// Compression ratios for "estimated installed size" — applied per-file based on
+// extension. The raw file system size overstates what actually ends up in the
+// packaged HAR/HSP because the toolchain transpiles + minifies + zips source,
+// while binary assets (images/audio/fonts) are already compressed. Numbers are
+// general JS/TS-ecosystem experience; HAR-specific data isn't publicly published.
+const CODE_EXTS=new Set(['ets','ts','js','mjs','tsx','jsx']);
+const TEXT_EXTS=new Set(['json','json5','xml','svg','yaml','yml','txt','md','html','css']);
+const BINARY_EXTS=new Set(['png','jpg','jpeg','webp','gif','bmp','ico','mp4','mp3','wav','m4a','ogg','ttf','otf','woff','woff2','pdf','zip']);
+const COMPRESSION_RATIO={code:0.4, text:0.3, binary:1.0, default:0.4};
+function compressionRatio(filePath){
+  const dot=String(filePath||'').lastIndexOf('.');
+  const ext=dot>=0?filePath.slice(dot+1).toLowerCase():'';
+  if(CODE_EXTS.has(ext))return COMPRESSION_RATIO.code;
+  if(TEXT_EXTS.has(ext))return COMPRESSION_RATIO.text;
+  if(BINARY_EXTS.has(ext))return COMPRESSION_RATIO.binary;
+  return COMPRESSION_RATIO.default;
+}
+function estimatedModuleSizeKB(entries, srcPrefix){
+  const bytes=entries.reduce((s,e)=>e.path.startsWith(srcPrefix+'/')?s+e.size*compressionRatio(e.path):s,0);
+  return Math.round(bytes/1024);
+}
 
 function parseJSON5(src){
   let out='', i=0, inStr=null;
@@ -266,7 +303,7 @@ async function scanCore(entries, projectName){
     if(pkgE){ try{ pkg=parseJSON5(await pkgE.text()); }catch(e){ warnings.push(`模块 ${m.name}: oh-package.json5 解析失败（${e.message}），依赖按空处理`);} }
     const mtype=mj.type||'har';
     const type=mtype==='shared'?'hsp':(mtype==='har'?'har':'hap');
-    const sizeKB=Math.round(entries.reduce((s,e)=>e.path.startsWith(m.src+'/')?s+e.size:s,0)/1024);
+    const sizeKB=estimatedModuleSizeKB(entries, m.src);
     const node={id:m.name, type, sub:mtype, size:sizeKB, desc:pkg.description||mj.description||'',
                 _deps:pkg.dependencies||{}, _dynDeps:pkg.dynamicDependencies||{}, _src:m.src};
     modules.push(node); byDir.set(m.src,node); if(pkg.name)byPkg.set(pkg.name,node);
@@ -306,6 +343,57 @@ async function scanCore(entries, projectName){
     } })();
   if(cyc.length) warnings.push('检测到循环依赖：'+cyc[0]);
   return sanitizeGraphData({projectName, scannedAt:new Date().toISOString(), modules, deps, warnings});
+}
+
+// Thresholds for the HAR-vs-HSP recommendation engine. All units are KB of
+// estimated installed size (post-compression). Each threshold may be tuned
+// per project; we expose them as an object so callers can override.
+const RECO_THRESHOLDS={LARGE_WASTE:200, MEDIUM_WASTE:50, MANY_COPIES:3, SMALL_HAR:50, LARGE_HSP_MIN:100};
+
+/**
+ * Recommend HAR-vs-HSP for one module given the precomputed analysis.
+ * Returns { level, label, reason, action, savings, notes } or null when no
+ * recommendation applies (HAPs are entry points, externals aren't owned).
+ *
+ *   level   = 'critical' | 'warning' | 'ok' | 'default'
+ *   action  = '下沉到 HSP' | '改回 HAR' | null
+ *   savings = KB potentially saved by following the action (may be 0)
+ *   notes   = follow-up checks the human should do (state, hot-path, etc.)
+ */
+function recommendModule(m, analysis, thresholds){
+  if(!m || m.ext || m.type==='hap') return null;
+  const T=thresholds||RECO_THRESHOLDS;
+  if(m.type==='har'){
+    const d=(analysis.dup||[]).find(x=>x.id===m.id) || {copies:0, waste:0, owners:[]};
+    const copies=d.copies, waste=d.waste, size=m.size||0;
+    const sinkNotes=['有全局状态（log buffer / 连接池 / session）→ 适合 HSP', '是高频工具函数 / 无状态 → 即便重复也保持 HAR'];
+    if(copies>=2 && waste>=T.LARGE_WASTE){
+      return {level:'critical', label:'强烈建议下沉到 HSP',
+        reason:`被 ${copies} 个 HAP/HSP 静态打入，重复浪费 ≈ ${waste}KB`,
+        action:'下沉到 HSP', savings:waste, notes:sinkNotes};
+    }
+    if((copies>=2 && waste>=T.MEDIUM_WASTE) || copies>=T.MANY_COPIES){
+      return {level:'warning', label:'建议下沉到 HSP',
+        reason:`被 ${copies} 个 HAP/HSP 静态打入，重复浪费 ≈ ${waste}KB`,
+        action:'下沉到 HSP', savings:waste, notes:sinkNotes};
+    }
+    if(copies<=1 && size<T.SMALL_HAR){
+      return {level:'ok', label:'保持 HAR', reason:'小且独占，无重复浪费'};
+    }
+    return {level:'default', label:'保持 HAR', reason:copies<=1?'独占，无重复浪费':'重复浪费在阈值内'};
+  }
+  if(m.type==='hsp'){
+    const consumers=(analysis.inn&&analysis.inn[m.id])?analysis.inn[m.id]:[];
+    const size=m.size||0;
+    if(consumers.length<=1 && size<T.LARGE_HSP_MIN){
+      return {level:'warning', label:'可考虑改回 HAR',
+        reason:`只有 ${consumers.length} 个消费者，体积 ${size}KB 小于 ${T.LARGE_HSP_MIN}KB 门槛`,
+        action:'改回 HAR', savings:0,
+        notes:['独立频繁升级 / 跨消费者共享状态 → 保持 HSP', '体积小且共享面窄 → HSP 运行时开销不值']};
+    }
+    return {level:'ok', label:'保持 HSP', reason:'共享合理'};
+  }
+  return null;
 }
 /* SCAN-CORE-END */
 
@@ -395,7 +483,11 @@ function buildAnalysis(data){
     const owners=bundles.filter(b=>b.bundled.has(m.id)).map(b=>b.root);
     return {id:m.id,owners,copies:owners.length,waste:Math.max(0,owners.length-1)*m.size};
   }).sort((a,b)=>b.copies-a.copies||b.waste-a.waste);
-  return {byId,out,inn,bundles,dup,totalWaste:dup.reduce((s,d)=>s+d.waste,0)};
+  const analysis={byId,out,inn,bundles,dup,totalWaste:dup.reduce((s,d)=>s+d.waste,0)};
+  // Annotate each module with a HAR-vs-HSP design recommendation
+  analysis.recommendations={};
+  data.modules.forEach(m=>{ const r=recommendModule(m, analysis); if(r) analysis.recommendations[m.id]=r; });
+  return analysis;
 }
 
 /* ================= 渲染 ================= */
@@ -534,7 +626,7 @@ function render(data,source){
     el('rect',{width:NW,height:NH,rx:9},n);
     const label=el('text',{x:10,y:19,class:'label'},n);
     label.textContent=m.id.length>16?m.id.slice(0,15)+'…':m.id;
-    el('text',{x:10,y:35,class:'sub'},n).textContent=`${m.type.toUpperCase()}·${m.sub}${m.size?' · 源码≈'+m.size+'K':''}`;
+    el('text',{x:10,y:35,class:'sub'},n).textContent=`${m.type.toUpperCase()}·${m.sub}${m.size?' · 体积≈'+m.size+'K':''}`;
     if(m.type==='har'){
       const d=A.dup.find(d=>d.id===m.id);
       if(d&&d.copies>=2){
@@ -760,19 +852,28 @@ function showDetail(id,fwd,rev){
     const cuts=[...b.boundaries].map(x=>`<span class="chip" data-sel="${x}">✂ ${x}</span>`).join('')||'<span class="muted">无</span>';
     html+=`${viewInfo}
       <div class="kv"><span>打包的静态模块（HAR，完整追溯）</span><b>${b.bundled.size} 个</b></div>
-      <div class="kv"><span>打入源码量（估算）</span><b>≈${b.kb} KB</b></div>
-      <div class="kv"><span>自身源码量（估算）</span><b>≈${m.size} KB</b></div>
+      <div class="kv"><span>打入安装包体积（估算）</span><b>≈${b.kb} KB</b></div>
+      <div class="kv"><span>自身安装包体积（估算）</span><b>≈${m.size} KB</b></div>
       <div style="margin-top:8px" class="muted">打包清单：</div><div class="modList">${chips}</div>
       <div style="margin-top:8px" class="muted">动态边界（运行时共享，不打入）：</div><div class="modList">${cuts}</div>`;
   }else{
     const d=A.dup.find(d=>d.id===id);
-    const chips=d.owners.map(o=>`<span class="chip" data-sel="${o}">${o}</span>`).join('')||'<span class="muted">未被任何包打入</span>';
+    const ownerChips=d.owners.map(o=>`<span class="chip" data-sel="${o}">${o}<span class="tag ${A.byId[o]?.type||'har'}" style="margin-left:5px;font-size:9px;padding:0 4px">${(A.byId[o]?.type||'').toUpperCase()}</span></span>`).join('')||'<span class="muted">未被任何包打入</span>';
     html+=`${viewInfo}
       <div class="kv"><span>${m.desc||'—'}</span><b>${m.size?'≈'+m.size+' KB':'体积未知'}</b></div>
-      <div class="kv"><span>被拷贝份数</span><b>${d.copies} 份</b></div>
-      <div class="kv"><span>重复源码量（估算）</span><b style="color:${d.waste?'var(--warn)':'var(--ok)'}">${d.waste?'≈'+d.waste+' KB':'—'}</b></div>
-      <div style="margin-top:8px" class="muted">被以下包打入：</div><div class="modList">${chips}</div>
-      ${d.copies>=2?'<div style="margin-top:8px" class="muted">优化建议：可考虑下沉到某个 HSP，由各包动态共享一份。</div>':''}`;
+      <div class="kv"><span>跨边界副本数</span><b>${d.copies} 份</b></div>
+      <div class="kv"><span>重复浪费体积（估算）</span><b style="color:${d.waste?'var(--warn)':'var(--ok)'}">${d.waste?'≈'+d.waste+' KB':'—'}</b></div>
+      <div style="margin-top:8px" class="muted">被以下 HAP/HSP 打入：</div><div class="modList">${ownerChips}</div>`;
+  }
+  // Per-module HAR-vs-HSP design recommendation
+  const reco=A.recommendations&&A.recommendations[id];
+  if(reco){
+    const noteList=(reco.notes||[]).map(n=>`<li>${n}</li>`).join('');
+    html+=`<div class="recoBox ${reco.level}">
+      <div class="recoTitle">📐 设计建议 · <span class="recoChip ${reco.level}">${reco.label}</span></div>
+      <div>${reco.reason}${reco.savings?` <span class="muted">（潜在节省 ≈ ${reco.savings}KB）</span>`:''}</div>
+      ${noteList?`<div class="recoNotes">人工核查：<ul>${noteList}</ul></div>`:''}
+    </div>`;
   }
   document.getElementById('detail').innerHTML=html;
   document.querySelectorAll('#detail .chip[data-sel]').forEach(c=>{
@@ -804,12 +905,16 @@ function renderLists(){
       <span class="num">${b.bundled.size}个/≈${b.kb}K</span></div>`;
   }).join('');
   const dups=A.dup.filter(d=>d.copies>=2);
-  document.getElementById('dupList').innerHTML=dups.length?dups.map(d=>`
-    <div class="row dupRow" data-id="${d.id}">
+  document.getElementById('dupList').innerHTML=dups.length?dups.map(d=>{
+    const reco=A.recommendations&&A.recommendations[d.id];
+    const chip=reco&&(reco.level==='critical'||reco.level==='warning')
+      ? `<span class="recoChip ${reco.level}" title="${escapeAttr(reco.reason||'')}">${reco.label}</span>`:'';
+    return `<div class="row dupRow" data-id="${d.id}">
       <span class="tag har">HAR</span><span class="name">${d.id}</span>
-      <span class="num">×${d.copies}${d.waste?' · ≈'+d.waste+'K':''}</span></div>`).join('')
-    :'<div class="muted" style="font-size:12px;padding:4px 8px">无重复打包</div>';
-  document.getElementById('wasteSum').textContent=A.totalWaste?`重复打包源码量合计 ≈${A.totalWaste} KB（估算，若全部去重）`:'';
+      ${chip}
+      <span class="num">×${d.copies}${d.waste?' · ≈'+d.waste+'K':''}</span></div>`;
+  }).join(''):'<div class="muted" style="font-size:12px;padding:4px 8px">无重复打包</div>';
+  document.getElementById('wasteSum').textContent=A.totalWaste?`重复打包体积合计 ≈${A.totalWaste} KB（估算安装包尺度，若全部去重）`:'';
   document.querySelectorAll('.row[data-id]').forEach(r=>{
     r.onclick=()=>selectOnly(r.dataset.id,true);
     r.oncontextmenu=ev=>{ev.preventDefault();selectFilter(r.dataset.id);};
@@ -820,7 +925,7 @@ function renderLists(){
 const tip=document.getElementById('tip');
 function showTip(ev,m){
   const wrap=document.getElementById('graphWrap').getBoundingClientRect();
-  tip.innerHTML=`<b>${m.id}</b>（${m.type.toUpperCase()} · ${m.sub}）<br>${m.desc||''}${m.size?' · 源码≈'+m.size+'KB':''}<br>依赖 ${A.out[m.id].length} 个 · 被 ${A.inn[m.id].length} 个依赖`;
+  tip.innerHTML=`<b>${m.id}</b>（${m.type.toUpperCase()} · ${m.sub}）<br>${m.desc||''}${m.size?' · 体积≈'+m.size+'KB':''}<br>依赖 ${A.out[m.id].length} 个 · 被 ${A.inn[m.id].length} 个依赖`;
   tip.style.left=Math.min(ev.clientX-wrap.left+14,wrap.width-290)+'px';
   tip.style.top=(ev.clientY-wrap.top+14)+'px';tip.style.opacity=1;
 }
