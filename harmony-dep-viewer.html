@@ -20,8 +20,22 @@
   .btn:hover{background:var(--bg);}
   .btn.primary{background:var(--hsp); border-color:var(--hsp); color:#fff;}
   .btn.primary:hover{opacity:.9;}
-  #status{font-size:12px; color:var(--ink2);}
-  .legend{display:flex; gap:12px; font-size:12px; color:var(--ink2); align-items:center; margin-left:auto;}
+  .iconBtn{padding:5px 10px;}
+  /* Dropdown menu (export, fold) */
+  .menuWrap{position:relative;}
+  .menuPop{position:absolute; top:calc(100% + 4px); left:0; background:var(--panel); border:1px solid var(--line); border-radius:6px; box-shadow:0 4px 14px rgba(0,0,0,.08); min-width:140px; padding:4px; z-index:30; display:none;}
+  .menuPop.show{display:block;}
+  .menuPop button{display:block; width:100%; text-align:left; padding:6px 10px; font-size:12.5px; border:0; background:transparent; border-radius:4px; cursor:pointer; color:var(--ink);}
+  .menuPop button:hover{background:var(--bg);}
+  .menuPop button.active{background:var(--hsp-bg); color:var(--hsp); font-weight:600;}
+  .menuPop label{display:flex; align-items:center; gap:6px; padding:5px 10px; font-size:12.5px; cursor:pointer; border-radius:4px;}
+  .menuPop label:hover{background:var(--bg);}
+  .menuPop .menuTitle{font-size:11px; color:var(--ink2); padding:4px 10px 2px;}
+  /* Compact two-line status block */
+  #status{display:flex; flex-direction:column; line-height:1.25; gap:1px; min-width:0;}
+  #status .statusMain{font-size:13px; color:var(--ink); font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  #status .statusSub{font-size:11px; color:var(--ink2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .legend{display:flex; gap:10px; font-size:12px; color:var(--ink2); align-items:center; margin-left:auto;}
   .legend .sw{display:inline-block; width:14px; height:10px; border-radius:3px; margin-right:4px; vertical-align:-1px; border:1.5px solid;}
   .legend .dash{display:inline-block; width:20px; border-top:2px dashed var(--hsp); margin-right:4px; vertical-align:3px;}
   .legend .solid{display:inline-block; width:20px; border-top:2px solid var(--har); margin-right:4px; vertical-align:3px;}
@@ -125,8 +139,13 @@
   .node.cluster rect{fill:#fef9e7; stroke:#b7950b; stroke-width:2.4; stroke-dasharray:1 0;}
   .node.cluster text.label{fill:#7d6608; font-weight:700;}
   .node.cluster text.sub{fill:#b7950b;}
-  .foldBtn{font-size:11.5px; padding:3px 9px;}
-  .foldBtn.active{background:#fef9e7; border-color:#b7950b; color:#7d6608; font-weight:600;}
+  /* Pill toggle button (used for cut, etc.) */
+  .pillBtn{padding:4px 12px; border-radius:14px; font-size:12px;}
+  .pillBtn.active{background:var(--hsp); border-color:var(--hsp); color:#fff;}
+  .pillBtn.active:hover{opacity:.9;}
+  /* Inline control group: small color label + select */
+  .ctrlGroup{display:inline-flex; align-items:center; gap:5px;}
+  .ctrlLabel{font-weight:600; font-size:12.5px;}
   /* Simulation panel */
   #simulationPanel .simBar{display:flex; align-items:center; gap:6px; font-size:12.5px; margin:3px 0;}
   #simulationPanel .simBar .label{width:64px; color:var(--ink2);}
@@ -148,15 +167,22 @@
 <body>
 <header>
   <h1>鸿蒙模块依赖分析</h1>
-  <button class="btn primary" onclick="scanProject()">扫描工程目录</button>
-  <button class="btn" onclick="clearData()">清除缓存数据</button>
-  <span id="status"></span>
+  <button class="btn primary iconBtn" onclick="scanProject()" title="选择鸿蒙工程根目录并重新扫描">📂 扫描</button>
+  <button class="btn iconBtn" onclick="clearData()" title="清除浏览器缓存，下次需重新扫描">🗑 清缓存</button>
+  <div class="menuWrap">
+    <button class="btn iconBtn" id="exportBtn" title="导出当前分析数据">📤 导出 ▾</button>
+    <div class="menuPop" id="exportMenu">
+      <button onclick="exportJSON();closeMenus()">分析 JSON</button>
+      <button onclick="exportCSV();closeMenus()">统计 CSV</button>
+    </div>
+  </div>
+  <div id="status"></div>
   <div class="legend">
     <span><span class="sw" style="background:var(--hap-bg);border-color:var(--hap)"></span>HAP</span>
     <span><span class="sw" style="background:var(--hsp-bg);border-color:var(--hsp)"></span>HSP</span>
     <span><span class="sw" style="background:var(--har-bg);border-color:var(--har)"></span>HAR</span>
-    <span><span class="solid"></span>静态依赖</span>
-    <span><span class="dash"></span>动态依赖</span>
+    <span><span class="solid"></span>静态</span>
+    <span><span class="dash"></span>动态</span>
     <button class="helpBtn" id="helpBtn" title="操作 & 体积说明" aria-label="帮助">?</button>
   </div>
 </header>
@@ -183,21 +209,35 @@
   <div id="graphWrap">
     <svg id="svg"></svg>
     <div id="ctrlBar">
-      <button class="btn" onclick="autoLayout()">自动排版</button>
-      <button class="btn" id="restoreHiddenBtn" onclick="restoreHiddenNodes()" disabled>恢复隐藏</button>
+      <button class="btn iconBtn" onclick="autoLayout()" title="自动重新排版">↻ 排版</button>
+      <button class="btn iconBtn" id="restoreHiddenBtn" onclick="restoreHiddenNodes()" disabled title="恢复所有被隐藏的节点">👁 恢复隐藏</button>
       <span class="sep"></span>
-      <span><span class="fwd">正向</span>（它依赖谁）
-        <select id="fLv"><option value="0">0 级（不看）</option><option value="1">1 级</option><option value="2">2 级</option><option value="3">3 级</option><option value="" selected>到底</option></select>
+      <span class="ctrlGroup">
+        <span class="ctrlLabel fwd" title="正向追溯：它依赖了谁，沿依赖箭头方向走">正向</span>
+        <select id="fLv" title="0=不看该方向，到底=完整追溯">
+          <option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="" selected>到底</option>
+        </select>
       </span>
-      <span><span class="rev">反向</span>（谁依赖它）
-        <select id="rLv"><option value="0">0 级（不看）</option><option value="1">1 级</option><option value="2">2 级</option><option value="3">3 级</option><option value="" selected>到底</option></select>
+      <span class="ctrlGroup">
+        <span class="ctrlLabel rev" title="反向追溯：谁依赖了它，逆向追根">反向</span>
+        <select id="rLv" title="0=不看该方向，到底=完整追溯">
+          <option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="" selected>到底</option>
+        </select>
       </span>
-      <label><input type="checkbox" id="cutChk" checked>遇 HSP/HAP 截断</label>
+      <button class="btn pillBtn active" id="cutBtn" onclick="toggleCut()" title="遇到 HSP/HAP 边界时停下，不再继续追溯">✂ 截断 HSP/HAP</button>
+      <!-- legacy hidden checkbox preserves the existing `cutChk` reads -->
+      <input type="checkbox" id="cutChk" checked style="display:none">
       <span class="sep"></span>
-      <input id="searchBox" list="nodeNames" placeholder="搜索模块名…" style="font-size:12.5px;padding:3px 8px;border:1px solid var(--line);border-radius:5px;width:150px">
+      <input id="searchBox" list="nodeNames" placeholder="🔍 搜索模块…" style="font-size:12.5px;padding:4px 8px;border:1px solid var(--line);border-radius:5px;width:140px">
       <datalist id="nodeNames"></datalist>
       <span class="sep"></span>
-      <span id="foldBar" style="display:flex;gap:4px;"></span>
+      <div class="menuWrap">
+        <button class="btn iconBtn" id="foldBtn" title="折叠 / 展开聚类（如 commons、shared）">📦 折叠 <span id="foldCount"></span>▾</button>
+        <div class="menuPop" id="foldMenu">
+          <div class="menuTitle">点击切换折叠：</div>
+          <div id="foldItems"></div>
+        </div>
+      </div>
     </div>
     <div id="tip"></div>
     <div id="empty">
@@ -206,10 +246,6 @@
     </div>
   </div>
   <aside>
-    <div class="tools">
-      <button class="btn" onclick="exportJSON()">导出分析 JSON</button>
-      <button class="btn" onclick="exportCSV()">导出统计 CSV</button>
-    </div>
     <div class="scroll">
       <div class="sec" id="detailSec" style="display:none">
         <h2 id="detailTitle"></h2>
@@ -540,7 +576,21 @@ function clearData(){
   document.getElementById('wasteSum').textContent=''; document.getElementById('detailSec').style.display='none';
   setStatus('缓存已清除');
 }
-function setStatus(t){ document.getElementById('status').textContent=t; }
+function setStatus(t){
+  // Plain string fallback (used by 'scanning…' messages)
+  const el=document.getElementById('status');
+  el.innerHTML='';
+  const main=document.createElement('div'); main.className='statusMain';
+  main.textContent=String(t||'');
+  el.appendChild(main);
+}
+function setStatusRich(main, sub){
+  const el=document.getElementById('status');
+  el.innerHTML='';
+  const m=document.createElement('div'); m.className='statusMain'; m.textContent=main||'';
+  const s=document.createElement('div'); s.className='statusSub'; s.textContent=sub||'';
+  el.appendChild(m); el.appendChild(s);
+}
 
 /* ================= 目录选择与扫描 ================= */
 async function scanProject(){
@@ -769,7 +819,16 @@ function render(data,source){
   const hiddenCount=(DATA.hiddenIds||[]).length;
   const foldedCount=(DATA.foldedClusters||[]).length;
   debugHide('render', {source, hiddenIds:DATA.hiddenIds||[], visibleModules:view.modules.length, visibleDeps:view.deps.length, folded:DATA.foldedClusters||[]});
-  setStatus(`${DATA.projectName} · ${view.modules.length} 模块 / ${view.deps.length} 依赖 · ${source} ${new Date(DATA.scannedAt).toLocaleString()}${hiddenCount?' · 已隐藏 '+hiddenCount+' 模块':''}${foldedCount?' · 已折叠 '+foldedCount+' 组':''}`);
+  const simCount=(DATA.simulatedHsp||[]).length;
+  const flags=[
+    hiddenCount?`已隐藏 ${hiddenCount}`:null,
+    foldedCount?`已折叠 ${foldedCount} 组`:null,
+    simCount?`🧪 模拟 ${simCount}`:null,
+  ].filter(Boolean).join(' · ');
+  setStatusRich(
+    `${DATA.projectName} · ${view.modules.length} 模块 / ${view.deps.length} 依赖`,
+    `${source} ${new Date(DATA.scannedAt).toLocaleString()}${flags?' · '+flags:''}`,
+  );
   updateHiddenControls();
   XY=computeLayout(renderView);
   if(DATA.positions) for(const [id,p] of Object.entries(DATA.positions)) if(XY[id])XY[id]={...p};
@@ -1048,17 +1107,49 @@ function unfoldCluster(name){
   render(DATA,lastSource);
 }
 function updateClusterFoldUI(modulesUnfolded){
-  const bar=document.getElementById('foldBar');
-  if(!bar)return;
+  const items=document.getElementById('foldItems');
+  const btn=document.getElementById('foldBtn');
+  const count=document.getElementById('foldCount');
+  const wrap=btn?.parentElement;
+  if(!items||!btn||!wrap)return;
   const counts=availableClusters(modulesUnfolded);
   const folded=new Set(DATA?.foldedClusters||[]);
-  const items=Object.keys(counts).filter(c=>counts[c]>=2);
-  bar.innerHTML=items.length?items.map(c=>{
+  const available=Object.keys(counts).filter(c=>counts[c]>=2).sort();
+  wrap.style.display=available.length?'':'none';
+  if(!available.length){ count.textContent=''; return; }
+  const foldedActive=available.filter(c=>folded.has(c)).length;
+  count.textContent=foldedActive?` (${foldedActive}) `:' ';
+  btn.classList.toggle('active', foldedActive>0);
+  items.innerHTML=available.map(c=>{
     const active=folded.has(c);
-    return `<button class="btn foldBtn${active?' active':''}" onclick="toggleFold('${escapeAttr(c)}')" title="${active?'展开':'折叠'} ${c}（${counts[c]} 个模块）">📦 ${c}${active?' ✓':''}</button>`;
-  }).join(''):'';
-  bar.style.display=items.length?'':'none';
+    return `<label><input type="checkbox" data-fold="${escapeAttr(c)}"${active?' checked':''}><span>📦 ${c}<span class="muted" style="font-size:11px"> · ${counts[c]} 个模块</span></span></label>`;
+  }).join('');
+  items.querySelectorAll('input[data-fold]').forEach(inp=>{
+    inp.onchange=()=>toggleFold(inp.dataset.fold);
+  });
 }
+function toggleCut(){
+  const chk=document.getElementById('cutChk');
+  const btn=document.getElementById('cutBtn');
+  chk.checked=!chk.checked;
+  btn.classList.toggle('active', chk.checked);
+  chk.dispatchEvent(new Event('change'));
+}
+// Generic dropdown menu plumbing (used by export, fold)
+function closeMenus(){ document.querySelectorAll('.menuPop.show').forEach(m=>m.classList.remove('show')); }
+document.addEventListener('click', ev=>{
+  const trigger=ev.target.closest('#exportBtn, #foldBtn');
+  if(trigger){
+    ev.stopPropagation();
+    const menu=trigger.nextElementSibling;
+    const wasOpen=menu.classList.contains('show');
+    closeMenus();
+    if(!wasOpen) menu.classList.add('show');
+    return;
+  }
+  if(!ev.target.closest('.menuPop')) closeMenus();
+});
+document.addEventListener('keydown', ev=>{ if(ev.key==='Escape') closeMenus(); });
 ['fLv','rLv','cutChk'].forEach(i=>document.getElementById(i).addEventListener('change',()=>{
   if(filterRoot)applyFocus(); else if(selected)selectOnly(selected);
 }));
