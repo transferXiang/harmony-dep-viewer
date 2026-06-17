@@ -262,7 +262,7 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(scan.deps)), [
 
 console.log('dynamic dependency scan tests passed');
 
-const renderStart = html.indexOf('const NW=');
+const renderStart = html.indexOf('const NODE_SIZES=');
 const renderEnd = html.indexOf('function computeLayoutFor', renderStart);
 assert(renderStart >= 0 && renderEnd >= 0, 'Could not find render geometry section');
 vm.runInContext(html.slice(renderStart, renderEnd), context, { filename: 'render-geometry.js' });

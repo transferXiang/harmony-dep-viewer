@@ -211,6 +211,15 @@
     <div id="ctrlBar">
       <button class="btn iconBtn" onclick="autoLayout()" title="自动重新排版">↻ 排版</button>
       <button class="btn iconBtn" id="restoreHiddenBtn" onclick="restoreHiddenNodes()" disabled title="恢复所有被隐藏的节点">👁 恢复隐藏</button>
+      <span class="ctrlGroup">
+        <span class="ctrlLabel" title="节点视觉大小（标签变长，间距变宽）">节点</span>
+        <select id="nodeSizeSel" onchange="setNodeSize(this.value)" title="改变节点尺寸 · 大尺寸能显示更长的模块名">
+          <option value="small">小</option>
+          <option value="medium" selected>中</option>
+          <option value="large">大</option>
+          <option value="xlarge">特大</option>
+        </select>
+      </span>
       <span class="sep"></span>
       <span class="ctrlGroup">
         <span class="ctrlLabel fwd" title="正向追溯：它依赖了谁，沿依赖箭头方向走">正向</span>
@@ -703,7 +712,22 @@ function buildAnalysis(data, options){
 /* ================= 渲染 ================= */
 const NS='http://www.w3.org/2000/svg';
 const svg=document.getElementById('svg');
-const NW=132,NH=46;
+// Node geometry by preset. NW/NH are mutated by setNodeSize() and read
+// throughout layout + rendering, so re-assigning them and re-rendering is
+// enough to scale every node.
+const NODE_SIZES={
+  small:  {nw:108, nh:38, labelFs:11, subFs:9,  labelY:17, subY:30, maxLabel:14, lx:158, ly:74},
+  medium: {nw:132, nh:46, labelFs:12, subFs:10, labelY:19, subY:35, maxLabel:16, lx:182, ly:84},
+  large:  {nw:172, nh:58, labelFs:14, subFs:11, labelY:22, subY:42, maxLabel:22, lx:222, ly:98},
+  xlarge: {nw:220, nh:72, labelFs:16, subFs:12, labelY:26, subY:50, maxLabel:30, lx:272, ly:114},
+};
+let NODE_SIZE='medium';
+let NW=NODE_SIZES.medium.nw, NH=NODE_SIZES.medium.nh;
+function setNodeSize(name){
+  if(!NODE_SIZES[name]) name='medium';
+  NODE_SIZE=name; NW=NODE_SIZES[name].nw; NH=NODE_SIZES[name].nh;
+  if(DATA){ DATA.nodeSize=name; delete DATA.positions; saveData(DATA); render(DATA,lastSource); }
+}
 let DATA=null, A=null, g=null, XY={}, edgeList=[], edgeEls={}, nodeEls={}, cutMarks={}, selected=null;
 let scale=1, tx=0, ty=0, lastSource='';
 
@@ -749,7 +773,7 @@ function computeLayoutFor(allIds, edgeArr){ // 对任意子图做分层布局
     }
   }
   allIds.forEach(id=>{if(layer[id]==null)layer[id]=0;});
-  const LX=182,LY=84;
+  const LX=NODE_SIZES[NODE_SIZE]?.lx||182, LY=NODE_SIZES[NODE_SIZE]?.ly||84;
   const layers=[];
   allIds.forEach(id=>{(layers[layer[id]]??=[]).push(id);});
   const pos={};
@@ -799,7 +823,15 @@ function updateEdgesFor(id){
 }
 
 function render(data,source){
-  DATA=sanitizeGraphData(data); const view=visibleGraphData(DATA);
+  DATA=sanitizeGraphData(data);
+  // Apply persisted node size before any layout / rendering happens.
+  if(DATA.nodeSize && NODE_SIZES[DATA.nodeSize]){
+    NODE_SIZE=DATA.nodeSize;
+    NW=NODE_SIZES[NODE_SIZE].nw; NH=NODE_SIZES[NODE_SIZE].nh;
+  }
+  const sizeSel=document.getElementById('nodeSizeSel');
+  if(sizeSel) sizeSel.value=NODE_SIZE;
+  const view=visibleGraphData(DATA);
   // Compute the BASELINE analysis (no simulation) — used to display
   // before/after when a sink simulation is active. The "live" A is the
   // simulated one when simulatedHsp is non-empty, otherwise both are equal.
@@ -843,8 +875,14 @@ function render(data,source){
   const el=(t,attrs,parent)=>{const e=document.createElementNS(NS,t);for(const k in attrs)e.setAttribute(k,attrs[k]);(parent||g).appendChild(e);return e;};
   const {byId}=A;
 
+  // Safety net: only draw edges whose BOTH endpoints will exist as nodes.
+  // Without this, mismatched ids (e.g. an unfolded edge whose target was
+  // folded into a cluster, but the cluster id wasn't applied) leave the
+  // line floating without a node attached.
+  const renderableIds=new Set(renderView.modules.map(m=>m.id));
   renderView.deps.forEach((edge)=>{
     const [a,b]=edge;
+    if(!renderableIds.has(a)||!renderableIds.has(b)) return;
     if(!XY[a]||!XY[b])return;
     const {d,mx,my}=edgePathD(a,b);
     const p=el('path',{d,class:'edge'+(edgeType(edge)==='dynamic'?' dyn':''),'marker-end':'url(#arrow)'});
@@ -854,16 +892,17 @@ function render(data,source){
     edgeEls[edgeKey(a,b)]=p;
     edgeList.push({a,b,el:p,mk});
   });
+  const sz=NODE_SIZES[NODE_SIZE]||NODE_SIZES.medium;
   renderView.modules.forEach(m=>{
     const {x,y}=XY[m.id];
     const n=el('g',{class:'node '+m.type+(m.ext?' ext':''),transform:`translate(${x},${y})`,'data-id':m.id});
     el('rect',{width:NW,height:NH,rx:9},n);
-    const label=el('text',{x:10,y:19,class:'label'},n);
-    label.textContent=m.id.length>16?m.id.slice(0,15)+'…':m.id;
+    const label=el('text',{x:10,y:sz.labelY,class:'label','font-size':sz.labelFs},n);
+    label.textContent=m.id.length>sz.maxLabel ? m.id.slice(0,sz.maxLabel-1)+'…' : m.id;
     if(m.type==='cluster'){
-      el('text',{x:10,y:35,class:'sub'},n).textContent=`📦 ${m._cluster.length} 个模块 · 共 ${m.size}K`;
+      el('text',{x:10,y:sz.subY,class:'sub','font-size':sz.subFs},n).textContent=`📦 ${m._cluster.length} 个模块 · 共 ${m.size}K`;
     }else{
-      el('text',{x:10,y:35,class:'sub'},n).textContent=`${m.type.toUpperCase()}·${m.sub}${m.size?' · 体积≈'+m.size+'K':''}`;
+      el('text',{x:10,y:sz.subY,class:'sub','font-size':sz.subFs},n).textContent=`${m.type.toUpperCase()}·${m.sub}${m.size?' · 体积≈'+m.size+'K':''}`;
     }
     if(m.type==='har'){
       const d=A.dup.find(d=>d.id===m.id);
@@ -993,29 +1032,46 @@ function applyFocus(){
   clearFocusClasses();
   const id=filterRoot;
   const cut=document.getElementById('cutChk').checked;
-  const fwd=traverse(id,A.out,lvVal('fLv'),cut,false);
-  const rev=traverse(id,A.inn,lvVal('rLv'),cut,true);
-  const visN=new Set([id,...fwd.nodes,...rev.nodes]);
-  const visE=new Set([...fwd.edges,...rev.edges]);
-  const isBoundary=nid=>nid!==id&&A.byId[nid].type!=='har'; // HSP/HAP 均为边界
+  // A.out / A.inn are built from the UNFOLDED view (so dup/recos stay
+  // accurate). But the rendered SVG uses folded ids. We translate every
+  // unfolded id reached by traverse into its displayed id before driving
+  // the .hidden / .fwd / .rev classes. Without this mapping, focus + fold
+  // produces phantom edges or fully blank views.
+  const memberToCluster={};
+  if(A.clusterMap){
+    for(const c of Object.values(A.clusterMap)){
+      for(const m of c.members) memberToCluster[m]=c.id;
+    }
+  }
+  const displayed=nid=>memberToCluster[nid]||nid;
+  const rawFwd=traverse(id,A.out,lvVal('fLv'),cut,false);
+  const rawRev=traverse(id,A.inn,lvVal('rLv'),cut,true);
+  // Map node/edge sets through the folded view
+  const fwdNodes=new Set([...rawFwd.nodes].map(displayed));
+  const revNodes=new Set([...rawRev.nodes].map(displayed));
+  const mapEdge=k=>{ const i=k.indexOf('>'); const a=displayed(k.slice(0,i)), b=displayed(k.slice(i+1)); return a===b?null:a+'>'+b; };
+  const fwdEdges=new Set([...rawFwd.edges].map(mapEdge).filter(Boolean));
+  const revEdges=new Set([...rawRev.edges].map(mapEdge).filter(Boolean));
+  const focusId=displayed(id);
+  const visN=new Set([focusId,...fwdNodes,...revNodes]);
+  const visE=new Set([...fwdEdges,...revEdges]);
+  // Pass mapped traversal to the detail panel
+  const fwd={nodes:fwdNodes, edges:fwdEdges};
+  const rev={nodes:revNodes, edges:revEdges};
+  const isBoundary=nid=>nid!==focusId && (A.byId[nid]?.type==='hsp'||A.byId[nid]?.type==='hap'||A.byId[nid]?.type==='cluster');
   for(const [nid,el] of Object.entries(nodeEls)){
     if(!visN.has(nid)){el.classList.add('hidden');continue;}
-    if(fwd.nodes.has(nid))el.classList.add('fwd');
-    if(rev.nodes.has(nid))el.classList.add('revN');
+    if(fwdNodes.has(nid))el.classList.add('fwd');
+    if(revNodes.has(nid))el.classList.add('revN');
     if(cut&&isBoundary(nid))el.classList.add('cutNode');
   }
   for(const [key,el] of Object.entries(edgeEls)){
     if(!visE.has(key)){el.classList.add('hidden');continue;}
-    const gt=key.indexOf('>'), ea=key.slice(0,gt), eb=key.slice(gt+1);
-    if(fwd.edges.has(key)){
-      el.classList.add('fwdE');
-    }
-    if(rev.edges.has(key)){
-      el.classList.add('revE');
-    }
+    if(fwdEdges.has(key)) el.classList.add('fwdE');
+    if(revEdges.has(key)) el.classList.add('revE');
   }
-  if(!selected||!visN.has(selected))selected=id;
-  nodeEls[selected].classList.add('root');
+  if(!selected||!visN.has(displayed(selected))) selected=focusId;
+  nodeEls[selected]?.classList.add('root');
   document.querySelectorAll('.row').forEach(r=>r.classList.toggle('active',r.dataset.id===selected));
   showDetail(id,fwd,rev);
 }
