@@ -1434,7 +1434,9 @@ function applyT(){g&&g.setAttribute('transform',`translate(${tx},${ty}) scale(${
 const wrap=document.getElementById('graphWrap');
 wrap.addEventListener('wheel',ev=>{
   if(!g)return; ev.preventDefault();
-  const k=ev.deltaY<0?1.12:0.89, ns=Math.min(3,Math.max(.3,scale*k));
+  // No zoom clamp — user explicitly asked for unbounded zoom. A tiny floor
+  // (1e-4) only exists to keep ns positive and finite for the transform math.
+  const k=ev.deltaY<0?1.12:0.89, ns=Math.max(1e-4, scale*k);
   const r=wrap.getBoundingClientRect();
   const s=graphScale();
   const gx=(ev.clientX-r.left)*s, gy=(ev.clientY-r.top)*s;
