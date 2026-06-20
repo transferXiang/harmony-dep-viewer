@@ -931,14 +931,17 @@ function autoLayout(){
   if(!DATA)return;
   if(filterRoot){ // 仅对当前筛选出的子图排版，不动其余节点、不退出筛选
     const cut=document.getElementById('cutChk').checked;
-    const fwd=traverse(filterRoot,A.out,lvVal('fLv'),cut,false);
-    const rev=traverse(filterRoot,A.inn,lvVal('rLv'),cut,true);
-    const visN=[...new Set([filterRoot,...fwd.nodes,...rev.nodes])];
-    const edges=[...new Set([...fwd.edges,...rev.edges])].map(k=>{
+    // Use the same fold-aware mapping as applyFocus so ids match nodeEls.
+    // Without this, a focus-mode autoLayout under cluster fold crashes
+    // because nodeEls[hiddenHarId] is undefined.
+    const sg=focusSubgraph(filterRoot, cut, lvVal('fLv'), lvVal('rLv'));
+    const visN=[...sg.visN].filter(id=>nodeEls[id]); // defensive: ignore ids without a node
+    const edges=[...sg.visE].map(k=>{
       const i=k.indexOf('>'); return [k.slice(0,i),k.slice(i+1)];
     });
     const xy=computeLayoutFor(visN,edges);
     for(const id of visN){
+      if(!xy[id]||!nodeEls[id]) continue;
       XY[id]={...xy[id]};
       nodeEls[id].setAttribute('transform',`translate(${XY[id].x},${XY[id].y})`);
       (DATA.positions??={})[id]={...XY[id]};
@@ -1027,35 +1030,37 @@ function clearSel(){
   clearFocusClasses();
   document.getElementById('detailSec').style.display='none';
 }
-function applyFocus(){
-  if(!A||!filterRoot)return;
-  clearFocusClasses();
-  const id=filterRoot;
-  const cut=document.getElementById('cutChk').checked;
-  // A.out / A.inn are built from the UNFOLDED view (so dup/recos stay
-  // accurate). But the rendered SVG uses folded ids. We translate every
-  // unfolded id reached by traverse into its displayed id before driving
-  // the .hidden / .fwd / .rev classes. Without this mapping, focus + fold
-  // produces phantom edges or fully blank views.
+// Shared helper: BFS-traverse the unfolded analysis graph from `rootId`,
+// then translate every visited id/edge through the current fold to
+// "displayed" (i.e. nodeEls/edgeEls) space. Returns mapped sets ready
+// to drive focus-mode UI, autoLayout, etc.
+function focusSubgraph(rootId, cut, fwdLv, revLv){
   const memberToCluster={};
-  if(A.clusterMap){
+  if(A&&A.clusterMap){
     for(const c of Object.values(A.clusterMap)){
       for(const m of c.members) memberToCluster[m]=c.id;
     }
   }
   const displayed=nid=>memberToCluster[nid]||nid;
-  const rawFwd=traverse(id,A.out,lvVal('fLv'),cut,false);
-  const rawRev=traverse(id,A.inn,lvVal('rLv'),cut,true);
-  // Map node/edge sets through the folded view
+  const rawFwd=traverse(rootId,A.out,fwdLv,cut,false);
+  const rawRev=traverse(rootId,A.inn,revLv,cut,true);
   const fwdNodes=new Set([...rawFwd.nodes].map(displayed));
   const revNodes=new Set([...rawRev.nodes].map(displayed));
   const mapEdge=k=>{ const i=k.indexOf('>'); const a=displayed(k.slice(0,i)), b=displayed(k.slice(i+1)); return a===b?null:a+'>'+b; };
   const fwdEdges=new Set([...rawFwd.edges].map(mapEdge).filter(Boolean));
   const revEdges=new Set([...rawRev.edges].map(mapEdge).filter(Boolean));
-  const focusId=displayed(id);
-  const visN=new Set([focusId,...fwdNodes,...revNodes]);
-  const visE=new Set([...fwdEdges,...revEdges]);
-  // Pass mapped traversal to the detail panel
+  const focusId=displayed(rootId);
+  return {displayed, focusId, fwdNodes, revNodes, fwdEdges, revEdges,
+    visN:new Set([focusId,...fwdNodes,...revNodes]),
+    visE:new Set([...fwdEdges,...revEdges])};
+}
+function applyFocus(){
+  if(!A||!filterRoot)return;
+  clearFocusClasses();
+  const id=filterRoot;
+  const cut=document.getElementById('cutChk').checked;
+  const sg=focusSubgraph(id, cut, lvVal('fLv'), lvVal('rLv'));
+  const {displayed, focusId, fwdNodes, revNodes, fwdEdges, revEdges, visN, visE}=sg;
   const fwd={nodes:fwdNodes, edges:fwdEdges};
   const rev={nodes:revNodes, edges:revEdges};
   const isBoundary=nid=>nid!==focusId && (A.byId[nid]?.type==='hsp'||A.byId[nid]?.type==='hap'||A.byId[nid]?.type==='cluster');
